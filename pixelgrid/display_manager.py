@@ -44,7 +44,8 @@ class DisplayManager:
                            if display.get("mask_bad_pixels", True) else [])
         self.matrix = build_matrix(SimpleNamespace(brightness=display["brightness"],
                                                    mapping=display["mapping"],
-                                                   slowdown=display["slowdown"]))
+                                                   slowdown=display["slowdown"]),
+                                   display.get("matrix_options", {}))
         self.canvas = self.matrix.CreateFrameCanvas()
         self.state = None
         self.widgets = []

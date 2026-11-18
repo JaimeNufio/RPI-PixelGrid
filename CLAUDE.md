@@ -14,7 +14,12 @@ Planned modes: weather/temperature, stock ticker, Christmas/holiday animations.
 - **Dead green LED at x=32, y=5** (0-indexed, top-left origin): white shows purple there.
   It's listed in `config.json` -> `display.bad_pixels`, and the manager draws it black in
   every mode. See `docs/PANEL_NOTES.md`.
-- `gpio_slowdown` 4–5 works on this Pi 4.
+- `gpio_slowdown` 3 is in use (4–5 also work, but refresh more slowly).
+- **Power is marginal:** a 5V/10A adapter feeds the HAT, which back-powers the Pi through the header.
+  The Pi logs under-voltage about 110 times an hour, even on dark scenes, and stays throttled to 600 MHz
+  (`vcgencmd get_throttled` = 0x50005). Flicker and brightness flashes trace back to this. The hardware
+  fix (raise the supply to ~5.2V, run the panel's power straight from the supply, or power the Pi
+  separately) is still pending. Software mitigation: `display.matrix_options` below.
 - Onboard audio is disabled (`dtparam=audio=off`, and `snd_bcm2835` is blacklisted) because
   it conflicts with the matrix driver's PWM timer.
 
@@ -52,7 +57,13 @@ Run everything from the repository root (`python -m ...`), so `pixelgrid` and `t
 
 ## Config (`config.json`)
 
-- `display`: brightness, mapping, slowdown, default fps, `bad_pixels`.
+- `display`: brightness, mapping, slowdown, default fps, `bad_pixels`, and `matrix_options`: library
+  timing settings passed to `RGBMatrixOptions` (`limit_refresh_rate_hz`, `pwm_bits`, `pwm_lsb_nanoseconds`,
+  `pwm_dither_bits`, `show_refresh_rate`; see `pixelgrid/matrix.py`). Tuned on 2026-11-18 by measuring
+  with `show_refresh_rate`: the defaults (11-bit, slowdown 5) gave ~98 Hz, varying 80–135. Now
+  `pwm_bits` 8 + slowdown 3 reach ~122 Hz (p1 107), capped at a steady 100 Hz. To re-measure, set
+  `show_refresh_rate: true`, run `ctl restart`, read `journalctl -u pixelgrid --all -o cat`
+  (`--all` is needed because the readout contains backspaces), then turn it off; it floods the journal.
 - `manager`: `http_host`/`http_port`, `api_token` (null = no auth), `db_path`,
   `random_modes` (what plays when the queue is empty), `random_duration` (null = until replaced),
   `startup_selftest` (run the selftest mode, about 10s, every time the service starts).

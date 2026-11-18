@@ -2,10 +2,11 @@
   "display": {
     "brightness": 60,
     "mapping": "adafruit-hat-pwm",
-    "slowdown": 5,
+    "slowdown": 3,
     "fps": 24,
     "mask_bad_pixels": true,
-    "bad_pixels": [[32, 5]]
+    "bad_pixels": [[32, 5]],
+    "matrix_options": {"pwm_bits": 8, "limit_refresh_rate_hz": 100}
   },
   "manager": {
     "http_host": "0.0.0.0",
