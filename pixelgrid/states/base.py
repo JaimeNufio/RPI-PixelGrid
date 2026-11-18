@@ -8,6 +8,7 @@ from pixelgrid.component import Component
 
 class State(Component):
     SECTION = "states"
+    MASK_BAD_PIXELS = True  # the selftest turns this off so bad pixels stay visible
 
     def update(self, dt):
         raise NotImplementedError

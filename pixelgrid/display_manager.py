@@ -55,6 +55,7 @@ class DisplayManager:
         self._stop = False
         self._last_random = None
         self.restart_requested = False
+        self._pending_resume = None  # item to resume after the startup selftest
         self.started_at = datetime.now().isoformat(timespec="seconds")
 
     # ---- requests (validated anywhere, executed on the frame loop) ----
@@ -218,7 +219,10 @@ class DisplayManager:
             self.current = None
 
     def _next(self, reason):
-        """Play the next queue item, or a random mode if the queue is empty."""
+        """Play the item saved by a requested restart, else the next queue item,
+        else a random mode."""
+        if self._resume(reason):
+            return
         while self.store and (item := self.store.queue_pop()) is not None:
             if self._switch(item, "queue", reason):
                 return
@@ -266,10 +270,23 @@ class DisplayManager:
 
     def run_service(self):
         """Run forever: queue first, else a random mode; obey interjections and skips.
-        After a requested restart, first resume whatever was playing."""
-        if not self._resume():
+        Starts with the selftest (config manager.startup_selftest); after a requested
+        restart, whatever was playing resumes next."""
+        self._pending_resume = self.store.meta_pop("resume") if self.store else None
+        if not (self.config.get("manager", {}).get("startup_selftest") and self._start_selftest()):
             self._next("startup")
         self._loop(service=True)
+
+    def _start_selftest(self):
+        cls = self.registry.get("selftest")
+        if cls is None:
+            return False
+        try:
+            entry = self.make_entry("selftest", duration=cls.total_seconds(self._merged(cls, {})))
+        except (ValueError, KeyError) as e:
+            print(f"Manager: skipping startup selftest ({e})", flush=True)
+            return False
+        return self._switch(entry, "selftest", "startup")
 
     def _save_resume(self):
         """Before a requested restart: remember the current item and its remaining time."""
@@ -283,8 +300,8 @@ class DisplayManager:
             entry["duration"] = round(remaining, 1)
         self.store.meta_set("resume", entry)
 
-    def _resume(self):
-        entry = self.store.meta_pop("resume") if self.store else None
+    def _resume(self, reason="startup"):
+        entry, self._pending_resume = self._pending_resume, None
         if not entry:
             return False
         try:
@@ -293,7 +310,7 @@ class DisplayManager:
         except (KeyError, ValueError) as e:
             print(f"Manager: can't resume after restart ({e}); starting fresh", flush=True)
             return False
-        return self._switch(entry, "resume", "startup")
+        return self._switch(entry, "resume", reason)
 
     def run_once(self, entry, duration=None):
         """Play one entry for `duration` seconds (None = until Ctrl+C / SIGTERM)."""
@@ -327,8 +344,9 @@ class DisplayManager:
                     traceback.print_exc()
                     self.canvas.Clear()
                     self._end_current("error")
-                for x, y in self.bad_pixels:
-                    self.canvas.SetPixel(x, y, 0, 0, 0)
+                if not self.state or self.state.MASK_BAD_PIXELS:
+                    for x, y in self.bad_pixels:
+                        self.canvas.SetPixel(x, y, 0, 0, 0)
                 self.canvas = self.matrix.SwapOnVSync(self.canvas)
                 elapsed = time.monotonic() - start
                 if elapsed < frame_time:

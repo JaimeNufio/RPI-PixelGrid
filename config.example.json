@@ -13,7 +13,8 @@
     "api_token": null,
     "db_path": "data/pixelgrid.db",
     "random_modes": ["snow"],
-    "random_duration": null
+    "random_duration": null,
+    "startup_selftest": true
   },
   "run": {
     "state": "snow",
@@ -42,6 +43,11 @@
       "date_color": "#ffffff",
       "date_gap": 5,
       "date_space": 2
+    },
+    "selftest": {
+      "color_seconds": 1,
+      "grid_seconds": 2,
+      "rainbow_seconds": 4
     }
   },
   "widgets": {

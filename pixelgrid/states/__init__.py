@@ -1,5 +1,6 @@
 """Registry of display states. Add new states here."""
 from pixelgrid.states.clock import ClockState
+from pixelgrid.states.selftest import SelfTestState
 from pixelgrid.states.snow import SnowState
 
-STATES = {cls.name: cls for cls in (SnowState, ClockState)}
+STATES = {cls.name: cls for cls in (SnowState, ClockState, SelfTestState)}
