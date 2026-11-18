@@ -12,7 +12,7 @@
     "http_port": 8080,
     "api_token": null,
     "db_path": "data/pixelgrid.db",
-    "random_modes": ["snow"],
+    "random_modes": ["snow-clock"],
     "random_duration": null,
     "startup_selftest": true
   },

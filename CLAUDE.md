@@ -74,7 +74,8 @@ Run everything from the repository root (`python -m ...`), so `pixelgrid` and `t
 - `PUT /state` interjects immediately; afterwards the queue resumes. The item it
   replaced does not resume.
 - At startup: the selftest first (if `manager.startup_selftest`). Then, after a requested restart
-  (`ctl restart` / `POST /admin/restart`), the item that was playing resumes with its remaining time;
+  (`ctl restart` / `POST /admin/restart`), the item that was playing resumes with its remaining time,
+  but only if it was a deliberate pick (API or queue; random picks are re-chosen from the config);
   otherwise the queue first, else random. A reboot
   or `systemctl restart` does not resume.
 - A mode that raises is logged, recorded in history as `error`, and skipped.

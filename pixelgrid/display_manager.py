@@ -196,6 +196,8 @@ class DisplayManager:
                 "ends_at": (datetime.now() + timedelta(seconds=duration)).isoformat(timespec="seconds")
                            if duration is not None else None,
                 "_t0": t0, "_history": history_id, "_entry": entry,
+                # where the item originally came from (survives being resumed after restarts)
+                "_origin": entry.get("origin") or source,
             }
         shown = label + (f" + {', '.join(w['name'] for w in widget_list)}" if widget_list and not entry.get("preset") else "")
         print(f"Manager: now playing {shown} ({source}, "
@@ -292,7 +294,11 @@ class DisplayManager:
         """Before a requested restart: remember the current item and its remaining time."""
         if not (self.store and self.current):
             return
+        origin = self.current["_origin"]
+        if origin in ("random", "selftest"):
+            return  # not a deliberate choice: pick fresh from the (possibly updated) config
         entry = dict(self.current["_entry"])
+        entry["origin"] = origin
         if entry["duration"] is not None:
             remaining = entry["duration"] - (time.monotonic() - self.current["_t0"])
             if remaining < 1:
@@ -304,9 +310,11 @@ class DisplayManager:
         entry, self._pending_resume = self._pending_resume, None
         if not entry:
             return False
+        origin = entry.get("origin")
         try:
             entry = self.make_entry(entry.get("preset") or entry["state"], entry.get("options"),
                                     entry.get("duration"), entry.get("widgets"))
+            entry["origin"] = origin
         except (KeyError, ValueError) as e:
             print(f"Manager: can't resume after restart ({e}); starting fresh", flush=True)
             return False
