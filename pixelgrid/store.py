@@ -17,6 +17,8 @@ CREATE TABLE IF NOT EXISTS queue (
     state      TEXT NOT NULL,
     options    TEXT NOT NULL DEFAULT '{}',
     duration   REAL,                      -- seconds; NULL = until replaced
+    widgets    TEXT NOT NULL DEFAULT '[]', -- [{"name", "options"}] drawn over the mode
+    preset     TEXT,                      -- preset name it came from, if any
     created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS history (
@@ -24,12 +26,18 @@ CREATE TABLE IF NOT EXISTS history (
     state      TEXT NOT NULL,
     options    TEXT NOT NULL DEFAULT '{}',
     duration   REAL,
-    source     TEXT NOT NULL,             -- random, queue, api, cli
+    widgets    TEXT NOT NULL DEFAULT '[]',
+    preset     TEXT,
+    source     TEXT NOT NULL,             -- random, queue, api, cli, resume
     started_at TEXT NOT NULL,
     ended_at   TEXT,
     end_reason TEXT                       -- finished, skipped, interrupted, replaced by queue, error, shutdown
 );
 CREATE INDEX IF NOT EXISTS history_started ON history(started_at);
+CREATE TABLE IF NOT EXISTS meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL                   -- JSON
+);
 """
 
 
@@ -47,10 +55,20 @@ class Store:
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA synchronous=NORMAL")
         self.conn.executescript(SCHEMA)
+        self._migrate()
         # Anything still "running" is from a run that didn't shut down cleanly.
         self.conn.execute("UPDATE history SET ended_at = ?, end_reason = 'unclean shutdown' "
                           "WHERE ended_at IS NULL", (now_iso(),))
         self._match_owner(path)
+
+    def _migrate(self):
+        """Add columns introduced after a database was first created."""
+        for table in ("queue", "history"):
+            have = {row["name"] for row in self.conn.execute(f"PRAGMA table_info({table})")}
+            if "widgets" not in have:
+                self.conn.execute(f"ALTER TABLE {table} ADD COLUMN widgets TEXT NOT NULL DEFAULT '[]'")
+            if "preset" not in have:
+                self.conn.execute(f"ALTER TABLE {table} ADD COLUMN preset TEXT")
 
     @staticmethod
     def _match_owner(path):
@@ -67,15 +85,19 @@ class Store:
     def _entry(row):
         d = dict(row)
         d["options"] = json.loads(d["options"])
+        d["widgets"] = json.loads(d.get("widgets") or "[]")
         return d
 
     # ---- queue ----
 
-    def queue_add(self, state, options, duration):
+    def queue_add(self, entry):
+        """Append an entry from DisplayManager.make_entry()."""
         with self.lock:
             cur = self.conn.execute(
-                "INSERT INTO queue (state, options, duration, created_at) VALUES (?, ?, ?, ?)",
-                (state, json.dumps(options), duration, now_iso()))
+                "INSERT INTO queue (state, options, duration, widgets, preset, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (entry["state"], json.dumps(entry["options"]), entry["duration"],
+                 json.dumps(entry.get("widgets") or []), entry.get("preset"), now_iso()))
             return cur.lastrowid
 
     def queue_list(self):
@@ -110,11 +132,12 @@ class Store:
 
     # ---- history ----
 
-    def history_start(self, state, options, duration, source):
+    def history_start(self, state, options, duration, source, widgets=(), preset=None):
         with self.lock:
             cur = self.conn.execute(
-                "INSERT INTO history (state, options, duration, source, started_at) VALUES (?, ?, ?, ?, ?)",
-                (state, json.dumps(options), duration, source, now_iso()))
+                "INSERT INTO history (state, options, duration, widgets, preset, source, started_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (state, json.dumps(options), duration, json.dumps(list(widgets)), preset, source, now_iso()))
             return cur.lastrowid
 
     def history_end(self, history_id, reason):
@@ -126,6 +149,19 @@ class Store:
         with self.lock:
             return [self._entry(r) for r in
                     self.conn.execute("SELECT * FROM history ORDER BY id DESC LIMIT ?", (limit,))]
+
+    # ---- small persistent values (e.g. what to resume after a restart) ----
+
+    def meta_set(self, key, value):
+        with self.lock:
+            self.conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", (key, json.dumps(value)))
+
+    def meta_pop(self, key):
+        """Return and delete a stored value (None if absent)."""
+        with self.lock:
+            row = self.conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+            self.conn.execute("DELETE FROM meta WHERE key = ?", (key,))
+            return json.loads(row["value"]) if row else None
 
     def close(self):
         with self.lock:

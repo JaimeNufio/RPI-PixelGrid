@@ -9,6 +9,10 @@ Plays the queue (or a random mode when it's empty), serves the HTTP API
 import argparse
 import sys
 
+# Exit code meaning "please restart me". Any non-zero exit makes systemd
+# (Restart=on-failure in deploy/pixelgrid.service) start a fresh process.
+RESTART_EXIT_CODE = 75
+
 from pixelgrid.config import CONFIG_PATH, load_config, resolve
 
 
@@ -39,6 +43,10 @@ def main():
     finally:
         server.shutdown()
         store.close()
+    if manager.restart_requested:
+        print(f"Manager: restart requested; exiting with code {RESTART_EXIT_CODE} so systemd restarts us.",
+              flush=True)
+        sys.exit(RESTART_EXIT_CODE)
 
 
 if __name__ == "__main__":

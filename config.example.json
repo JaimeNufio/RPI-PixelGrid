@@ -43,5 +43,19 @@
       "date_gap": 5,
       "date_space": 2
     }
+  },
+  "widgets": {
+    "clock": {
+      "date_format": "",
+      "top": 8,
+      "outline": 1,
+      "outline_color": "#000000"
+    }
+  },
+  "presets": {
+    "snow-clock": {
+      "state": "snow",
+      "widgets": ["clock"]
+    }
   }
 }

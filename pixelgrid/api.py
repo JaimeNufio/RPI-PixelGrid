@@ -2,19 +2,27 @@
 
   GET    /modes           available modes, their options and config defaults
   GET    /state           what's playing now
-  PUT    /state           play something right now: {"state": "snow", "options": {...}, "duration": 60}
+  GET    /widgets         available widgets, their options and config defaults
+  PUT    /state           play something right now:
+                          {"state": "snow", "options": {...}, "duration": 60, "widgets": ["clock"]}
   POST   /state/skip      end the current item and move on
   GET    /queue           queued items, in play order
   POST   /queue           add to the end of the queue (same body as PUT /state)
   DELETE /queue           clear the queue
   DELETE /queue/<id>      remove one queued item
   GET    /history?limit=N recent plays, newest first (default 50, max 500)
+  GET    /health          process id, start time and loaded code version
+  POST   /admin/restart   restart the service to load new code/config (systemd restarts it)
 
-"options" holds only overrides; anything left out uses config.json. A
-"duration" of null (or leaving it out) means play until something replaces it.
+"state" may be a mode or a preset (config "presets"). "options" holds only
+overrides; anything left out uses config.json. "widgets" is a list of names or
+{"name", "options"} objects; leaving it out uses the preset's widgets (or
+none). A "duration" of null (or leaving it out) means play until replaced.
 If config "manager" -> "api_token" is set, send "Authorization: Bearer <token>".
 """
 import json
+import os
+import subprocess
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -22,16 +30,41 @@ from urllib.parse import parse_qs, urlparse
 MAX_BODY = 64 * 1024
 
 
+def code_version():
+    """Short git commit of the loaded code, plus '+dirty' if there are uncommitted changes."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    # The service runs as root but the repo belongs to the user; without safe.directory,
+    # git refuses to read it ("dubious ownership"). Scoped to this one repo and command.
+    git = ["git", "-c", f"safe.directory={root}", "-C", root]
+    try:
+        rev = subprocess.run(git + ["rev-parse", "--short", "HEAD"],
+                             capture_output=True, text=True, timeout=5).stdout.strip()
+        dirty = subprocess.run(git + ["status", "--porcelain", "--untracked-files=no"],
+                               capture_output=True, text=True, timeout=5).stdout.strip()
+        return (rev + ("+dirty" if dirty else "")) or None
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+VERSION = code_version()  # captured at startup: the code this process actually loaded
+
+
+def options_info(manager, cls):
+    defaults = cls.defaults(manager.config)
+    return {opt: {"type": typ.__name__, "help": help_text, "default": defaults.get(opt)}
+            for opt, (typ, help_text) in cls.OPTIONS.items()}
+
+
 def modes_info(manager):
-    info = {}
-    for name, cls in sorted(manager.registry.items()):
-        defaults = manager.config["states"].get(name, {})
-        info[name] = {
-            "fps": cls.FPS or manager.default_fps,
-            "options": {opt: {"type": typ.__name__, "help": help_text, "default": defaults.get(opt)}
-                        for opt, (typ, help_text) in cls.OPTIONS.items()},
-        }
+    info = {name: {"fps": cls.FPS or manager.default_fps, "options": options_info(manager, cls)}
+            for name, cls in sorted(manager.registry.items())}
+    for name, preset in sorted(manager.presets.items()):
+        info[name] = {"preset": preset}
     return info
+
+
+def widgets_info(manager):
+    return {name: {"options": options_info(manager, cls)} for name, cls in sorted(manager.widget_registry.items())}
 
 
 def make_handler(manager, store, token):
@@ -61,7 +94,7 @@ def make_handler(manager, store, token):
 
         def entry_from_body(self):
             b = self.body()
-            return manager.make_entry(b.get("state"), b.get("options"), b.get("duration"))
+            return manager.make_entry(b.get("state"), b.get("options"), b.get("duration"), b.get("widgets"))
 
         def route(self, method):
             if token and self.headers.get("Authorization") != f"Bearer {token}":
@@ -76,6 +109,8 @@ def make_handler(manager, store, token):
         def dispatch(self, method, parts, query):
             if parts in ([], ["modes"]) and method == "GET":
                 return self.send(200, modes_info(manager))
+            if parts == ["widgets"] and method == "GET":
+                return self.send(200, widgets_info(manager))
             if parts == ["state"]:
                 if method == "GET":
                     return self.send(200, manager.snapshot())
@@ -91,7 +126,7 @@ def make_handler(manager, store, token):
                     return self.send(200, store.queue_list())
                 if method == "POST":
                     entry = self.entry_from_body()
-                    item_id = store.queue_add(entry["state"], entry["options"], entry["duration"])
+                    item_id = store.queue_add(entry)
                     manager.notify_queue()
                     return self.send(201, {"id": item_id, **entry})
                 if method == "DELETE":
@@ -102,6 +137,12 @@ def make_handler(manager, store, token):
                 if store.queue_remove(int(parts[1])):
                     return self.send(200, {"removed": int(parts[1])})
                 return self.send(404, {"error": f"no queue item {parts[1]}"})
+            if parts == ["health"] and method == "GET":
+                return self.send(200, {"pid": os.getpid(), "started_at": manager.started_at,
+                                       "version": VERSION, "state": manager.snapshot().get("state")})
+            if parts == ["admin", "restart"] and method == "POST":
+                manager.request_restart()
+                return self.send(202, {"restarting": True, "pid": os.getpid()})
             if parts == ["history"] and method == "GET":
                 try:
                     limit = int(query.get("limit", ["50"])[0])

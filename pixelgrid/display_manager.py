@@ -8,6 +8,12 @@ Scheduling (service mode):
   - interject() (HTTP PUT /state) takes over immediately; when it ends, the
     queue resumes.
 
+An entry is a mode plus optional widgets drawn on top of it:
+    {"state": "snow", "options": {...}, "duration": 60,
+     "widgets": [{"name": "clock", "options": {"top": 4}}], "preset": None}
+A preset (config "presets") is a named mode + widgets combination, usable
+anywhere a mode name is (API, queue, random_modes, run.py).
+
 All matrix and state work happens on the frame-loop thread. Other threads
 (the HTTP API) only call interject(), skip(), notify_queue() and snapshot().
 """
@@ -22,13 +28,16 @@ from types import SimpleNamespace
 
 from pixelgrid.matrix import build_matrix
 from pixelgrid.states import STATES
+from pixelgrid.widgets import WIDGETS
 
 
 class DisplayManager:
-    def __init__(self, config, store=None, registry=STATES):
+    def __init__(self, config, store=None, registry=STATES, widget_registry=WIDGETS):
         self.config = config
         self.store = store
         self.registry = registry
+        self.widget_registry = widget_registry
+        self.presets = config.get("presets", {})
         display = config["display"]
         self.default_fps = float(display["fps"])
         self.bad_pixels = ([tuple(p) for p in display.get("bad_pixels", [])]
@@ -38,22 +47,39 @@ class DisplayManager:
                                                    slowdown=display["slowdown"]))
         self.canvas = self.matrix.CreateFrameCanvas()
         self.state = None
+        self.widgets = []
         self.current = None              # what's playing, for snapshot(); guarded by _lock
         self._lock = threading.Lock()
         self._commands = queue.Queue()   # from API threads to the frame loop
         self.queue_waiting = threading.Event()
         self._stop = False
         self._last_random = None
+        self.restart_requested = False
+        self.started_at = datetime.now().isoformat(timespec="seconds")
 
     # ---- requests (validated anywhere, executed on the frame loop) ----
 
-    def make_entry(self, name, options=None, duration=None):
-        """Validate a request to play a mode. Returns {"state", "options", "duration"}.
-        options holds only overrides; config defaults are merged in at play time."""
+    def available(self):
+        return sorted(set(self.registry) | set(self.presets))
+
+    def make_entry(self, name, options=None, duration=None, widgets=None):
+        """Validate a request to play a mode or preset. Returns a normalized entry:
+        {"state", "preset", "options", "duration", "widgets": [{"name", "options"}]}.
+        options hold only overrides; config defaults are merged in at play time.
+        widgets=None means the preset's widgets (or none); [] means no widgets."""
         if not name:
             raise ValueError("'state' is required")
-        if name not in self.registry:
-            raise ValueError(f"unknown state {name!r}; available: {', '.join(sorted(self.registry))}")
+        preset = None
+        if name in self.presets:
+            preset, p = name, self.presets[name]
+            name = p.get("state")
+            if name not in self.registry:
+                raise ValueError(f"preset {preset!r} uses unknown state {name!r}")
+            options = {**p.get("options", {}), **(options or {})}
+            if widgets is None:
+                widgets = p.get("widgets", [])
+        elif name not in self.registry:
+            raise ValueError(f"unknown state {name!r}; available: {', '.join(self.available())}")
         if options is None:
             options = {}
         if not isinstance(options, dict):
@@ -65,11 +91,36 @@ class DisplayManager:
                 raise ValueError("'duration' must be a number of seconds, or null") from None
             if duration <= 0:
                 raise ValueError("'duration' must be > 0, or null to run until replaced")
-        self.registry[name](self._merged(name, options))  # raises ValueError if invalid
-        return {"state": name, "options": options, "duration": duration}
+        self.registry[name](self._merged(self.registry[name], options))  # raises ValueError if invalid
+        widget_list = self._normalize_widgets(widgets or [])
+        for w in widget_list:
+            self._build_widget(w)  # raises ValueError if invalid
+        return {"state": name, "preset": preset, "options": options, "duration": duration,
+                "widgets": widget_list}
 
-    def _merged(self, name, overrides):
-        return {**self.config["states"].get(name, {}), **overrides}
+    def _normalize_widgets(self, widgets):
+        if not isinstance(widgets, list):
+            raise ValueError("'widgets' must be a list of names or {\"name\", \"options\"} objects")
+        out = []
+        for w in widgets:
+            if isinstance(w, str):
+                w = {"name": w}
+            if not isinstance(w, dict) or not w.get("name"):
+                raise ValueError("each widget must be a name or an object with a 'name'")
+            if w["name"] not in self.widget_registry:
+                raise ValueError(f"unknown widget {w['name']!r}; available: {', '.join(sorted(self.widget_registry))}")
+            opts = w.get("options") or {}
+            if not isinstance(opts, dict):
+                raise ValueError(f"widget {w['name']!r}: 'options' must be an object")
+            out.append({"name": w["name"], "options": opts})
+        return out
+
+    def _merged(self, cls, overrides):
+        return {**cls.defaults(self.config), **overrides}
+
+    def _build_widget(self, w):
+        cls = self.widget_registry[w["name"]]
+        return cls(self._merged(cls, w["options"]))
 
     def interject(self, entry):
         """Play entry right away, replacing whatever is on (thread-safe)."""
@@ -97,47 +148,69 @@ class DisplayManager:
         """Finish after the current frame (also the SIGTERM handler)."""
         self._stop = True
 
+    def request_restart(self):
+        """Stop cleanly and tell the entry point to exit with RESTART_EXIT_CODE, which
+        systemd (Restart=on-failure) answers by starting a fresh process with the latest
+        code and config (thread-safe)."""
+        self.restart_requested = True
+        self._stop = True
+
     # ---- switching (frame-loop thread only) ----
 
     def _switch(self, entry, source, reason):
         name = entry["state"]
+        label = entry.get("preset") or name
+        widget_list = entry.get("widgets") or []
         try:
-            new = self.registry[name](self._merged(name, entry["options"]))
+            new = self.registry[name](self._merged(self.registry[name], entry["options"]))
+            new_widgets = [self._build_widget(w) for w in widget_list]
         except (KeyError, ValueError) as e:
-            print(f"Manager: can't play {name!r}: {e}", flush=True)
+            print(f"Manager: can't play {label!r}: {e}", flush=True)
             return False
         self._end_current(reason)
+        started = []
         try:
-            new.enter()
+            for part in [new, *new_widgets]:
+                part.enter()
+                started.append(part)
         except Exception:
-            print(f"Manager: {name} failed to start:", flush=True)
+            print(f"Manager: {label} failed to start:", flush=True)
             traceback.print_exc()
+            for part in started:
+                part.stop_workers()
             new.stop_workers()
             return False
         self.state = new
+        self.widgets = new_widgets
         duration = entry["duration"]
-        history_id = self.store.history_start(name, entry["options"], duration, source) if self.store else None
+        history_id = (self.store.history_start(name, entry["options"], duration, source,
+                                               widgets=widget_list, preset=entry.get("preset"))
+                      if self.store else None)
         t0 = time.monotonic()
         with self._lock:
             self.current = {
-                "state": name, "options": entry["options"], "duration": duration, "source": source,
+                "state": name, "preset": entry.get("preset"), "widgets": widget_list,
+                "options": entry["options"], "duration": duration, "source": source,
                 "started_at": datetime.now().isoformat(timespec="seconds"),
                 "ends_at": (datetime.now() + timedelta(seconds=duration)).isoformat(timespec="seconds")
                            if duration is not None else None,
-                "_t0": t0, "_history": history_id,
+                "_t0": t0, "_history": history_id, "_entry": entry,
             }
-        print(f"Manager: now playing {name} ({source}, "
+        shown = label + (f" + {', '.join(w['name'] for w in widget_list)}" if widget_list and not entry.get("preset") else "")
+        print(f"Manager: now playing {shown} ({source}, "
               + ("until replaced" if duration is None else f"{duration:g}s") + ")", flush=True)
         return True
 
     def _end_current(self, reason):
         if self.state is None:
             return
-        try:
-            self.state.exit()
-        except Exception:
-            traceback.print_exc()
-        self.state.stop_workers()
+        for part in [self.state, *self.widgets]:
+            try:
+                part.exit()
+            except Exception:
+                traceback.print_exc()
+            part.stop_workers()
+        self.widgets = []
         if self.store and self.current and self.current["_history"] is not None:
             self.store.history_end(self.current["_history"], reason)
         self.state = None
@@ -153,13 +226,17 @@ class DisplayManager:
 
     def _play_random(self, reason):
         mcfg = self.config.get("manager", {})
-        choices = [m for m in mcfg.get("random_modes", sorted(self.registry)) if m in self.registry]
+        choices = [m for m in mcfg.get("random_modes", sorted(self.registry))
+                   if m in self.registry or m in self.presets]
         choices = choices or sorted(self.registry)
         if len(choices) > 1 and self._last_random in choices:
             choices.remove(self._last_random)  # avoid repeating the same mode back to back
         name = random.choice(choices)
         self._last_random = name
-        entry = {"state": name, "options": {}, "duration": mcfg.get("random_duration")}
+        try:
+            entry = self.make_entry(name, duration=mcfg.get("random_duration"))
+        except ValueError as e:
+            raise RuntimeError(f"random mode {name!r} is invalid: {e}") from None
         if not self._switch(entry, "random", reason):
             raise RuntimeError(f"random mode {name!r} can't start; check config.json")
 
@@ -188,9 +265,35 @@ class DisplayManager:
     # ---- run loops ----
 
     def run_service(self):
-        """Run forever: queue first, else a random mode; obey interjections and skips."""
-        self._next("startup")
+        """Run forever: queue first, else a random mode; obey interjections and skips.
+        After a requested restart, first resume whatever was playing."""
+        if not self._resume():
+            self._next("startup")
         self._loop(service=True)
+
+    def _save_resume(self):
+        """Before a requested restart: remember the current item and its remaining time."""
+        if not (self.store and self.current):
+            return
+        entry = dict(self.current["_entry"])
+        if entry["duration"] is not None:
+            remaining = entry["duration"] - (time.monotonic() - self.current["_t0"])
+            if remaining < 1:
+                return  # about to end anyway; let the queue/rotation take over
+            entry["duration"] = round(remaining, 1)
+        self.store.meta_set("resume", entry)
+
+    def _resume(self):
+        entry = self.store.meta_pop("resume") if self.store else None
+        if not entry:
+            return False
+        try:
+            entry = self.make_entry(entry.get("preset") or entry["state"], entry.get("options"),
+                                    entry.get("duration"), entry.get("widgets"))
+        except (KeyError, ValueError) as e:
+            print(f"Manager: can't resume after restart ({e}); starting fresh", flush=True)
+            return False
+        return self._switch(entry, "resume", "startup")
 
     def run_once(self, entry, duration=None):
         """Play one entry for `duration` seconds (None = until Ctrl+C / SIGTERM)."""
@@ -211,8 +314,12 @@ class DisplayManager:
                 frame_time = 1.0 / fps
                 try:
                     self.state.update(frame_time)
+                    for w in self.widgets:
+                        w.update(frame_time)
                     self.canvas.Clear()
                     self.state.draw(self.canvas)
+                    for w in self.widgets:
+                        w.draw(self.canvas)
                 except Exception:
                     if not service:
                         raise
@@ -229,6 +336,8 @@ class DisplayManager:
         except KeyboardInterrupt:
             pass
         finally:
-            self._end_current("shutdown")
+            if self.restart_requested:
+                self._save_resume()
+            self._end_current("restart" if self.restart_requested else "shutdown")
             self.matrix.Clear()
             print("Display: stopped.", flush=True)
