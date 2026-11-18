@@ -31,6 +31,9 @@ from pixelgrid.matrix import build_matrix
 from pixelgrid.activities import ACTIVITIES
 from pixelgrid.widgets import WIDGETS
 
+PREFETCH_LEAD = 60.0  # seconds before a timed item ends to warm the next item's data
+READY_WAIT = 20.0     # longest the current item is held while the next one has no data yet
+
 
 class DisplayManager:
     def __init__(self, config, store=None, registry=ACTIVITIES, widget_registry=WIDGETS):
@@ -57,6 +60,9 @@ class DisplayManager:
         self._stop = False
         self._rotation_next = 0          # index of the next rotation item
         self._last_rotation = None
+        self._next_pick = None           # rotation index chosen ahead of time (so it can be prefetched)
+        self._prefetched_for = None      # _t0 of the item whose successor was already prefetched
+        self._waiting_since = None       # when we started holding the current item for the next one's data
         self.restart_requested = False
         self._pending_resume = None  # item to resume after the startup selftest
         self.started_at = datetime.now().isoformat(timespec="seconds")
@@ -187,6 +193,7 @@ class DisplayManager:
             return False
         self.activity = new
         self.widgets = new_widgets
+        self._waiting_since = None
         duration = entry["duration"]
         history_id = (self.store.history_start(name, entry["options"], duration, source,
                                                widgets=widget_list, preset=entry.get("preset"))
@@ -244,13 +251,22 @@ class DisplayManager:
     def rotation_entry(self, item):
         return self.make_entry(item.get("activity"), item.get("options"), item.get("duration"), item.get("widgets"))
 
+    def _upcoming_rotation_index(self):
+        """Index of the rotation item that plays next. Chosen once and remembered, so the
+        prefetch and the actual switch agree even with shuffle on."""
+        items = self.rotation()
+        if self._next_pick is None or self._next_pick >= len(items):
+            if self.config.get("manager", {}).get("shuffle"):
+                choices = [i for i in range(len(items)) if i != self._last_rotation] or [0]
+                self._next_pick = random.choice(choices)
+            else:
+                self._next_pick = self._rotation_next % len(items)
+        return self._next_pick
+
     def _play_rotation(self, reason):
         items = self.rotation()
-        if self.config.get("manager", {}).get("shuffle"):
-            choices = [i for i in range(len(items)) if i != self._last_rotation] or [0]
-            index = random.choice(choices)
-        else:
-            index = self._rotation_next % len(items)
+        index = self._upcoming_rotation_index()
+        self._next_pick = None
         self._rotation_next, self._last_rotation = index + 1, index
         item = items[index]
         try:
@@ -275,12 +291,67 @@ class DisplayManager:
             return
         cur = self.current
         if cur["duration"] is not None:
-            if time.monotonic() - cur["_t0"] >= cur["duration"]:
+            elapsed = time.monotonic() - cur["_t0"]
+            if cur["duration"] - elapsed <= PREFETCH_LEAD and self._prefetched_for != cur["_t0"]:
+                self._prefetched_for = cur["_t0"]
+                upcoming = self._peek_next()
+                if upcoming:
+                    self._prefetch_async([upcoming])
+            if elapsed >= cur["duration"] and not self._hold_for_next():
                 self._next("finished")
         elif self.queue_waiting.is_set():
             self.queue_waiting.clear()
             if self.store and self.store.queue_peek() is not None:
                 self._next("replaced by queue")
+
+    # ---- data warm-up (so an activity never opens on a blank "loading" frame) ----
+
+    def _peek_next(self):
+        """The entry that plays next if the current one ends now, without consuming it."""
+        if self.store and (item := self.store.queue_peek()) is not None:
+            return item
+        try:
+            return self.rotation_entry(self.rotation()[self._upcoming_rotation_index()])
+        except (ValueError, AttributeError, IndexError):
+            return None
+
+    def _prefetch_async(self, entries):
+        """Run each entry's Activity.prefetch() in a background thread."""
+        def run():
+            for e in entries:
+                cls = self.registry.get(e.get("activity"))
+                if cls is None:
+                    continue
+                try:
+                    cls.prefetch(self._merged(cls, e.get("options") or {}))
+                except Exception as ex:  # network down, etc.: the activity retries when it plays
+                    print(f"Manager: prefetch for {e.get('preset') or e['activity']} failed: {ex}", flush=True)
+        threading.Thread(target=run, name="prefetch", daemon=True).start()
+
+    def _ready(self, entry):
+        cls = self.registry.get(entry.get("activity"))
+        try:
+            return cls is None or cls.ready(self._merged(cls, entry.get("options") or {}))
+        except Exception:
+            return True
+
+    def _hold_for_next(self):
+        """True to keep the current item up a little longer because the next one has no data
+        yet (at most READY_WAIT seconds, then it switches anyway)."""
+        upcoming = self._peek_next()
+        if upcoming is None or self._ready(upcoming):
+            self._waiting_since = None
+            return False
+        label = upcoming.get("preset") or upcoming["activity"]
+        if self._waiting_since is None:
+            self._waiting_since = time.monotonic()
+            print(f"Manager: {label} has no data yet; holding the current item up to {READY_WAIT:g}s", flush=True)
+            self._prefetch_async([upcoming])
+        if time.monotonic() - self._waiting_since < READY_WAIT:
+            return True
+        print(f"Manager: {label} still has no data after {READY_WAIT:g}s; switching anyway", flush=True)
+        self._waiting_since = None
+        return False
 
     # ---- run loops ----
 
@@ -289,6 +360,14 @@ class DisplayManager:
         Starts with the selftest (config manager.startup_selftest); after a requested
         restart, whatever was playing resumes next."""
         self._pending_resume = self.store.meta_pop("resume") if self.store else None
+        # Warm every rotation item's data while the selftest plays, whatever comes first.
+        warm = [self._pending_resume] if self._pending_resume else []
+        for item in self.rotation():
+            try:
+                warm.append(self.rotation_entry(item))
+            except (ValueError, AttributeError):
+                pass
+        self._prefetch_async([e for e in warm if e.get("activity")])
         if not (self.config.get("manager", {}).get("startup_selftest") and self._start_selftest()):
             self._next("startup")
         self._loop(service=True)
@@ -337,6 +416,12 @@ class DisplayManager:
     def run_once(self, entry, duration=None):
         """Play one entry for `duration` seconds (None = until Ctrl+C / SIGTERM)."""
         entry = {**entry, "duration": duration}  # so logs and snapshot() show the real run length
+        cls = self.registry.get(entry["activity"])
+        if cls:
+            try:
+                cls.prefetch(self._merged(cls, entry["options"]))  # first frame shows real data
+            except Exception as e:
+                print(f"prefetch failed ({e}); the activity will retry", flush=True)
         if not self._switch(entry, "cli", "start"):
             raise ValueError(f"can't play {entry['activity']!r}")
         self._loop(service=False, deadline=None if duration is None else time.monotonic() + duration)

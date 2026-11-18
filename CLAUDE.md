@@ -95,7 +95,8 @@ Run everything from the repository root (`python -m ...`), so `pixelgrid` and `t
 
 - Each item plays for `duration` seconds, or until replaced if `duration` is null.
 - An until-replaced item gives way as soon as something is in the queue.
-- When an item ends: the next queue item plays, else the next `rotation` item. Interjected and
+- When an item ends: the next queue item plays, else the next `rotation` item. If that item's
+  data isn't loaded yet (`Activity.ready()`), the current item stays up until it is, at most 20s. Interjected and
   queued items don't advance the rotation; it carries on where it left off.
 - `PUT /activity` interjects immediately; afterwards the queue resumes. The item it
   replaced does not resume.
@@ -143,7 +144,12 @@ preset changes, run `.venv/bin/python -m tools.api_docs` (`--check` reports a st
 2. Keep `__init__` cheap with no side effects: the manager builds throwaway instances to
    validate API requests. Do setup in `enter()`.
 3. Fetch network data with `self.every(seconds, fn)` (a background thread that stops on
-   exit), never in `update()`/`draw()`.
+   exit), never in `update()`/`draw()`. Keep the data in a module-level cache that outlives one
+   play, and implement the classmethods `prefetch(opts)` (fill the cache; may block) and
+   `ready(opts)` (cache has data). The manager prefetches every rotation item at startup and
+   the next item `PREFETCH_LEAD` (60s) before a switch, and holds the current item up to
+   `READY_WAIT` (20s) while the next isn't ready, so a play never opens on a blank frame.
+   See `pixelgrid/activities/weather.py`.
 4. Register it in `pixelgrid/activities/__init__.py`, add its defaults under `activities.<name>` in **both**
    `config.json` and `config.example.json`, and add it to `manager.rotation` if it
    should rotate in. Then run `.venv/bin/python -m tools.api_docs` to update `docs/API.md`.

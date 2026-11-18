@@ -30,6 +30,8 @@ demo > 0 skips the network and cycles through every condition (and the night
 variants) every `demo` seconds with made-up temperatures, for judging the icons.
 """
 import json
+import threading
+import time
 import urllib.parse
 import urllib.request
 from datetime import date, datetime
@@ -65,6 +67,66 @@ COMMON_OPTIONS = {
 }
 
 
+# Shared across plays (and prefetched by the manager before weather comes up), so a
+# new play shows data immediately instead of a blank "--°" while the first fetch runs.
+_cache = {}                  # (latitude, longitude, units) -> (time.monotonic() of fetch, data)
+_cache_lock = threading.Lock()
+_fetch_lock = threading.Lock()   # one network fetch at a time (prefetch + a playing instance)
+
+
+def cache_key(opts):
+    return round(opts["latitude"], 4), round(opts["longitude"], 4), opts["units"]
+
+
+def cache_get(opts):
+    """(age in seconds, data) from the shared cache, or None."""
+    with _cache_lock:
+        hit = _cache.get(cache_key(opts))
+    return (time.monotonic() - hit[0], hit[1]) if hit else None
+
+
+def cached_or_fetch(opts):
+    """Data no older than opts["refresh"], fetching (and caching) if needed."""
+    with _fetch_lock:
+        hit = cache_get(opts)
+        if hit and hit[0] < opts["refresh"]:
+            return hit[1]
+        data = fetch_weather(opts)
+        with _cache_lock:
+            _cache[cache_key(opts)] = (time.monotonic(), data)
+        return data
+
+
+def fetch_weather(o):
+    """{"temp", "cond", "night", "high", "low",
+        "hours": [(label, cond, night, temp)],   # whole hours after now
+        "days": [(label, cond, high, low)]}      # today first"""
+    query = urllib.parse.urlencode({
+        "latitude": o["latitude"], "longitude": o["longitude"],
+        "current": "temperature_2m,weather_code,is_day",
+        "hourly": "temperature_2m,weather_code,is_day",
+        "daily": "weather_code,temperature_2m_max,temperature_2m_min",
+        "temperature_unit": o["units"], "timezone": "auto",
+        "forecast_hours": 6, "forecast_days": 4,
+    })
+    with urllib.request.urlopen(f"{API_URL}?{query}", timeout=15) as resp:
+        raw = json.load(resp)
+    cur, hourly, daily = raw["current"], raw.get("hourly") or {}, raw["daily"]
+    now = datetime.fromisoformat(cur["time"])
+    hours = []
+    for t, temp, code, is_day in zip(hourly.get("time", []), hourly.get("temperature_2m", []),
+                                     hourly.get("weather_code", []), hourly.get("is_day", [])):
+        t = datetime.fromisoformat(t)
+        if t > now and temp is not None and code is not None:
+            hours.append((t.strftime("%-I%p"), condition(code), not is_day, round(temp)))
+    days = [(date.fromisoformat(d).strftime("%a"), condition(code), round(hi), round(lo))
+            for d, code, hi, lo in zip(daily["time"], daily["weather_code"],
+                                       daily["temperature_2m_max"], daily["temperature_2m_min"])]
+    return {"temp": round(cur["temperature_2m"]), "cond": condition(cur["weather_code"]),
+            "night": not cur["is_day"], "high": days[0][2], "low": days[0][3],
+            "hours": hours, "days": days}
+
+
 class WeatherBase(Activity):
     FPS = 2
     ICON_KEYS = ("icon_set",)   # options naming an icon set (validated, and set FPS for animated ones)
@@ -96,41 +158,27 @@ class WeatherBase(Activity):
         self.line_top, self.line_h = y0, y1 - y0 + 1
         if any(o[k] == "lbc" for k in self.ICON_KEYS):
             self.FPS = ANIM_FPS
-        self.data = None   # set by fetch() from the background thread; see fetch() for the shape
+        cached = cache_get(o)
+        self.data = cached[1] if cached else None   # shown immediately; fetch() refreshes it (see fetch_weather())
         self.t = 0.0
         self.pixels = []
         if o["demo"] <= 0:
             self.every(o["refresh"], self.fetch)
 
     def fetch(self):
-        """Store {"temp", "cond", "night", "high", "low",
-                  "hours": [(label, cond, night, temp)],   # whole hours after now
-                  "days": [(label, cond, high, low)]}      # today first"""
-        o = self.opts
-        query = urllib.parse.urlencode({
-            "latitude": o["latitude"], "longitude": o["longitude"],
-            "current": "temperature_2m,weather_code,is_day",
-            "hourly": "temperature_2m,weather_code,is_day",
-            "daily": "weather_code,temperature_2m_max,temperature_2m_min",
-            "temperature_unit": o["units"], "timezone": "auto",
-            "forecast_hours": 6, "forecast_days": 4,
-        })
-        with urllib.request.urlopen(f"{API_URL}?{query}", timeout=15) as resp:
-            raw = json.load(resp)
-        cur, hourly, daily = raw["current"], raw.get("hourly") or {}, raw["daily"]
-        now = datetime.fromisoformat(cur["time"])
-        hours = []
-        for t, temp, code, is_day in zip(hourly.get("time", []), hourly.get("temperature_2m", []),
-                                         hourly.get("weather_code", []), hourly.get("is_day", [])):
-            t = datetime.fromisoformat(t)
-            if t > now and temp is not None and code is not None:
-                hours.append((t.strftime("%-I%p"), condition(code), not is_day, round(temp)))
-        days = [(date.fromisoformat(d).strftime("%a"), condition(code), round(hi), round(lo))
-                for d, code, hi, lo in zip(daily["time"], daily["weather_code"],
-                                           daily["temperature_2m_max"], daily["temperature_2m_min"])]
-        self.data = {"temp": round(cur["temperature_2m"]), "cond": condition(cur["weather_code"]),
-                     "night": not cur["is_day"], "high": days[0][2], "low": days[0][3],
-                     "hours": hours, "days": days}
+        """Background refresh while playing: reuse the shared cache while it's fresh."""
+        self.data = cached_or_fetch(self.opts)
+
+    @classmethod
+    def prefetch(cls, opts):
+        """Warm the shared cache before this activity plays (called by the manager)."""
+        if opts["demo"] <= 0:
+            cached_or_fetch(opts)
+
+    @classmethod
+    def ready(cls, opts):
+        """True when there's data to show right away (any age; a stale cache beats a blank screen)."""
+        return opts["demo"] > 0 or cache_get(opts) is not None
 
     def demo_data(self):
         """Fake data for step int(t / demo): every slot steps through all conditions, and every

@@ -24,6 +24,19 @@ class Activity(Component):
     def update(self, dt):
         raise NotImplementedError
 
+    # Data warm-up. Activities that show outside data (weather, tickers) keep it in a module-level
+    # cache that outlives one play, so a new play can draw real data on its first frame.
+    @classmethod
+    def prefetch(cls, opts):
+        """Fill caches for a play with these (merged) options. Called by the manager in a
+        background thread at startup and shortly before this activity comes up. May block."""
+
+    @classmethod
+    def ready(cls, opts):
+        """True if a play with these options can show real data right away. When the next
+        item isn't ready, the manager keeps the current one up a little longer (READY_WAIT)."""
+        return True
+
     def screen_times(self):
         """[(screen, seconds)] for one cycle, skipping screens set to 0."""
         fixed = {s: self.opts.get(f"{s}_seconds") for s in self.SCREENS}

@@ -32,6 +32,9 @@ changes (it rebuilds the reference at the bottom; `--check` tells you if it's st
 - **What plays when**: an interjection (`PUT /activity`) plays immediately; when an item ends,
   the next queued item plays; with an empty queue, the rotation (config `manager.rotation`)
   continues in order, cycling forever. Interjected and queued items don't advance the rotation.
+  Activities that show outside data (weather) are fetched ahead of time; if the next item's data
+  still isn't there when the current one ends, the current one stays up until it is (at most 20s,
+  so `remaining` can sit at 0 briefly). `PUT /activity` never waits.
 
 ## Endpoints
 
