@@ -2,10 +2,10 @@
 
 An always-on LED display: a Raspberry Pi 4 (8 GB, Debian 13 "trixie") drives an
 Adafruit 64x64 RGB matrix through the Adafruit RGB Matrix HAT. A manager
-service rotates through display modes (only `snow` exists so far), with a
+service rotates through display modes (`snow`, `clock`), with a
 persistent queue, on-demand interjections over HTTP, and a SQLite play history.
 
-Planned modes: clock, weather/temperature, stock ticker, Christmas/holiday animations.
+Planned modes: weather/temperature, stock ticker, Christmas/holiday animations.
 
 ## Hardware facts
 
@@ -27,6 +27,9 @@ Planned modes: clock, weather/temperature, stock ticker, Christmas/holiday anima
 | `store.py` | SQLite queue + history (`data/pixelgrid.db`, WAL mode) |
 | `states/base.py` | `State` base class for every mode |
 | `states/snow.py` | Snow mode |
+| `states/clock.py` | Clock mode: HH:MM in an explicit IANA timezone (DST-safe), centered on its visible pixels |
+| `states/text.py` | BDF font renderer (`load_font`, `render`, `ink_bounds`) shared by text modes |
+| `fonts/` | Public-domain BDF fonts copied from the library (10x20, 9x18B, 6x10); add more from `rpi-rgb-led-matrix/fonts/` |
 | `states/__init__.py` | Mode registry (`STATES`); register new modes here |
 | `run.py` | One-off runner for testing a single mode; refuses to start while the service is up |
 | `snowfall.py` | Old shortcut for `run.py --state snow` |
@@ -81,7 +84,8 @@ If `api_token` is set, send `Authorization: Bearer <token>`.
    `config.json` and `config.example.json`, and add it to `manager.random_modes` if it
    should rotate in.
 5. `draw()` gets an already-cleared canvas; the manager masks bad pixels after it.
-6. Fonts for text modes: `rpi-rgb-led-matrix/fonts/*.bdf` (use `rgbmatrix.graphics`).
+6. For text, use `states/text.py` (`load_font(name).render(text)` gives pixel offsets, so you
+   can measure the ink bounds and center exactly). See `states/clock.py`. Fonts go in `fonts/`.
 
 ## Running
 

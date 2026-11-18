@@ -30,6 +30,18 @@
       "shift_rows": 5,
       "shift_interval": 2,
       "max_pile": 40
+    },
+    "clock": {
+      "timezone": "America/New_York",
+      "time_format": "%-I:%M",
+      "ampm_format": "%p",
+      "date_format": "%a %b %-d",
+      "font": "10x20",
+      "small_font": "5x7",
+      "color": "#ffffff",
+      "date_color": "#ffffff",
+      "date_gap": 5,
+      "date_space": 2
     }
   }
 }
