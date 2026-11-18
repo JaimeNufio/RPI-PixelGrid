@@ -37,6 +37,7 @@ Run everything from the repository root (`python -m ...`), so `pixelgrid` and `t
 | `pixelgrid/states/base.py` | `State(Component)`: base for modes (defaults in `states.<name>`) |
 | `pixelgrid/states/snow.py` | Snow mode |
 | `pixelgrid/states/clock.py` | Clock mode: time in an explicit IANA timezone (DST-safe), small AM/PM, date line; centered on visible pixels |
+| `pixelgrid/states/selftest.py` | Selftest mode: solid R/G/B/W, coordinate grid, diagonal rainbow; runs at service startup; doesn't mask bad pixels (`MASK_BAD_PIXELS = False`) |
 | `pixelgrid/widgets/base.py` | `Widget(Component)`: overlay drawn on top of any mode (defaults in `widgets.<name>`) |
 | `pixelgrid/widgets/clock.py` | Clock widget: the clock mode's layout (inherits `states.clock`), `top` row (-1 = centered), black `outline` ring so the mode underneath never touches the text |
 | `pixelgrid/widgets/__init__.py` | Widget registry (`WIDGETS`) |
@@ -45,6 +46,7 @@ Run everything from the repository root (`python -m ...`), so `pixelgrid` and `t
 | `fonts/` | Public-domain BDF fonts (10x20, 9x18B, 6x10, 5x7, 4x6); add more from `rpi-rgb-led-matrix/fonts/` |
 | `deploy/pixelgrid.service` | systemd unit; runs `python -m pixelgrid.manager` as root |
 | `deploy/setup_root.sh` | One-time root setup (apt packages, disable audio) |
+| `deploy/git-hooks/post-commit` | Git hook (symlinked from `.git/hooks/post-commit`): after a commit that touches `pixelgrid/` or `fonts/`, runs `ctl restart` if the service is up |
 | `docs/PANEL_NOTES.md` | Known bad pixels on this panel |
 | `config.json` | Local config, **gitignored** (holds `api_token`). Template: `config.example.json` |
 
@@ -52,7 +54,8 @@ Run everything from the repository root (`python -m ...`), so `pixelgrid` and `t
 
 - `display`: brightness, mapping, slowdown, default fps, `bad_pixels`.
 - `manager`: `http_host`/`http_port`, `api_token` (null = no auth), `db_path`,
-  `random_modes` (what plays when the queue is empty), `random_duration` (null = until replaced).
+  `random_modes` (what plays when the queue is empty), `random_duration` (null = until replaced),
+  `startup_selftest` (run the selftest mode, about 10s, every time the service starts).
 - `run`: defaults for `pixelgrid.run` (`state`, `duration`; `"indefinite"` or 0 = forever).
 - `states.<mode>`: default options for each mode. Every declared option must be present, either
   there or inherited: a component with `INHERITS = ("clock",)` takes matching options from
@@ -70,7 +73,10 @@ Run everything from the repository root (`python -m ...`), so `pixelgrid` and `t
   `random_modes` (never the same random mode twice in a row when there's a choice).
 - `PUT /state` interjects immediately; afterwards the queue resumes. The item it
   replaced does not resume.
-- At startup: the queue first, else random.
+- At startup: the selftest first (if `manager.startup_selftest`). Then, after a requested restart
+  (`ctl restart` / `POST /admin/restart`), the item that was playing resumes with its remaining time;
+  otherwise the queue first, else random. A reboot
+  or `systemctl restart` does not resume.
 - A mode that raises is logged, recorded in history as `error`, and skipped.
 
 ## HTTP API
@@ -143,6 +149,8 @@ priority. That permission is lost whenever apt updates python3.13; check with `g
 - Claude can't use `sudo` (it needs a password, and `!` commands have no terminal for the
   prompt). Give the user root commands to run in their own terminal. Interactive editors
   don't work through `!` either.
+- Committing changes under `pixelgrid/` or `fonts/` restarts the service automatically (post-commit hook).
+  Config-only or uncommitted changes don't; run `ctl restart` for those.
 - After changing code or config, reload the service with `python -m pixelgrid.ctl restart` (no sudo;
   needs the service to already be running code that has `/admin/restart`). Unit-file changes still
   need `sudo systemctl daemon-reload` by the user.
@@ -158,6 +166,7 @@ priority. That permission is lost whenever apt updates python3.13; check with `g
 ```bash
 sudo bash deploy/setup_root.sh                            # apt deps, disable audio; reboot after
 cp config.example.json config.json                        # then set api_token
+ln -sf ../../deploy/git-hooks/post-commit .git/hooks/post-commit   # auto-restart after commits
 python3 -m venv .venv
 curl -sL https://github.com/hzeller/rpi-rgb-led-matrix/archive/refs/heads/master.tar.gz | tar xz
 mv rpi-rgb-led-matrix-master rpi-rgb-led-matrix
