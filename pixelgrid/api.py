@@ -1,20 +1,20 @@
 """HTTP API for the display manager. Standard library only; runs in background threads.
 
-  GET    /modes           available modes, their options and config defaults
-  GET    /state           what's playing now
+  GET    /activities      available activities, their options and config defaults
+  GET    /activity        what's playing now
   GET    /widgets         available widgets, their options and config defaults
-  PUT    /state           play something right now:
-                          {"state": "snow", "options": {...}, "duration": 60, "widgets": ["clock"]}
-  POST   /state/skip      end the current item and move on
+  PUT    /activity        play something right now:
+                          {"activity": "snow", "options": {...}, "duration": 60, "widgets": ["clock"]}
+  POST   /activity/skip   end the current item and move on
   GET    /queue           queued items, in play order
-  POST   /queue           add to the end of the queue (same body as PUT /state)
+  POST   /queue           add to the end of the queue (same body as PUT /activity)
   DELETE /queue           clear the queue
   DELETE /queue/<id>      remove one queued item
   GET    /history?limit=N recent plays, newest first (default 50, max 500)
   GET    /health          process id, start time and loaded code version
   POST   /admin/restart   restart the service to load new code/config (systemd restarts it)
 
-"state" may be a mode or a preset (config "presets"). "options" holds only
+"activity" may be an activity or a preset (config "presets"). "options" holds only
 overrides; anything left out uses config.json. "widgets" is a list of names or
 {"name", "options"} objects; leaving it out uses the preset's widgets (or
 none). A "duration" of null (or leaving it out) means play until replaced.
@@ -55,7 +55,7 @@ def options_info(manager, cls):
             for opt, (typ, help_text) in cls.OPTIONS.items()}
 
 
-def modes_info(manager):
+def activities_info(manager):
     info = {name: {"fps": cls.FPS or manager.default_fps, "options": options_info(manager, cls)}
             for name, cls in sorted(manager.registry.items())}
     for name, preset in sorted(manager.presets.items()):
@@ -94,7 +94,7 @@ def make_handler(manager, store, token):
 
         def entry_from_body(self):
             b = self.body()
-            return manager.make_entry(b.get("state"), b.get("options"), b.get("duration"), b.get("widgets"))
+            return manager.make_entry(b.get("activity"), b.get("options"), b.get("duration"), b.get("widgets"))
 
         def route(self, method):
             if token and self.headers.get("Authorization") != f"Bearer {token}":
@@ -107,20 +107,20 @@ def make_handler(manager, store, token):
                 return self.send(400, {"error": str(e)})
 
         def dispatch(self, method, parts, query):
-            if parts in ([], ["modes"]) and method == "GET":
-                return self.send(200, modes_info(manager))
+            if parts in ([], ["activities"]) and method == "GET":
+                return self.send(200, activities_info(manager))
             if parts == ["widgets"] and method == "GET":
                 return self.send(200, widgets_info(manager))
-            if parts == ["state"]:
+            if parts == ["activity"]:
                 if method == "GET":
                     return self.send(200, manager.snapshot())
                 if method == "PUT":
                     entry = self.entry_from_body()
                     manager.interject(entry)
                     return self.send(202, {"playing": entry})
-            if parts == ["state", "skip"] and method == "POST":
+            if parts == ["activity", "skip"] and method == "POST":
                 manager.skip()
-                return self.send(202, {"skipped": manager.snapshot().get("state")})
+                return self.send(202, {"skipped": manager.snapshot().get("activity")})
             if parts == ["queue"]:
                 if method == "GET":
                     return self.send(200, store.queue_list())
@@ -139,7 +139,7 @@ def make_handler(manager, store, token):
                 return self.send(404, {"error": f"no queue item {parts[1]}"})
             if parts == ["health"] and method == "GET":
                 return self.send(200, {"pid": os.getpid(), "started_at": manager.started_at,
-                                       "version": VERSION, "state": manager.snapshot().get("state")})
+                                       "version": VERSION, "activity": manager.snapshot().get("activity")})
             if parts == ["admin", "restart"] and method == "POST":
                 manager.request_restart()
                 return self.send(202, {"restarting": True, "pid": os.getpid()})

@@ -1,4 +1,4 @@
-"""Snow state: falling flakes that drift, land, and level out into a pile.
+"""Snow activity: falling flakes that drift, land, and level out into a pile.
 
 Flakes fall from the top at slightly different speeds and drift between
 adjacent columns. A flake that lands next to a lower column slides off into
@@ -15,7 +15,7 @@ import math
 import random
 
 from pixelgrid.matrix import SIZE
-from pixelgrid.states.base import State
+from pixelgrid.activities.base import Activity
 
 AREA = SIZE * SIZE
 FLAKE_COLOR = (255, 255, 255)
@@ -37,7 +37,7 @@ def mound_heights(peak):
     return heights
 
 
-class SnowState(State):
+class SnowActivity(Activity):
     name = "snow"
     OPTIONS = {
         "rate": (float, "new flakes per second"),

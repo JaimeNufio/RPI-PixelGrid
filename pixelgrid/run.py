@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Run one mode directly, for testing. Defaults come from config.json; flags override them for this run.
+"""Run one activity directly, for testing. Defaults come from config.json; flags override them for this run.
 
 For the always-on service with the queue and HTTP API, use pixelgrid.manager (see deploy/pixelgrid.service).
 Run from the repository root:
 
     sudo .venv/bin/python -m pixelgrid.run                      # config defaults
-    sudo .venv/bin/python -m pixelgrid.run --state clock --indefinite
-    sudo .venv/bin/python -m pixelgrid.run --state snow-clock         # a preset: snow + clock widget
-    sudo .venv/bin/python -m pixelgrid.run --state snow --widget clock
+    sudo .venv/bin/python -m pixelgrid.run --activity clock --indefinite
+    sudo .venv/bin/python -m pixelgrid.run --activity snow-clock         # a preset: snow + clock widget
+    sudo .venv/bin/python -m pixelgrid.run --activity snow --widget clock
     sudo .venv/bin/python -m pixelgrid.run --rate 3 --duration 600
     .venv/bin/python -m pixelgrid.run --help                    # every flag, with its config default
 """
@@ -16,7 +16,7 @@ import socket
 import sys
 
 from pixelgrid.config import CONFIG_PATH, load_config
-from pixelgrid.states import STATES
+from pixelgrid.activities import ACTIVITIES
 from pixelgrid.widgets import WIDGETS
 
 
@@ -24,21 +24,21 @@ def flag(name):
     return "--" + name.replace("_", "-")
 
 
-def resolve_state(config, name):
-    """(mode name, preset name or None) for a mode or preset name."""
+def resolve_activity(config, name):
+    """(activity name, preset name or None) for an activity or preset name."""
     preset = config.get("presets", {}).get(name)
-    return (preset["state"], name) if preset else (name, None)
+    return (preset["activity"], name) if preset else (name, None)
 
 
-def build_parser(config, state_name):
+def build_parser(config, activity_name):
     disp = config["display"]
-    mode, _ = resolve_state(config, state_name)
-    state_cfg = STATES[mode].defaults(config)
-    choices = sorted(set(STATES) | set(config.get("presets", {})))
+    activity, _ = resolve_activity(config, activity_name)
+    activity_cfg = ACTIVITIES[activity].defaults(config)
+    choices = sorted(set(ACTIVITIES) | set(config.get("presets", {})))
     run_cfg = config["run"]
     p = argparse.ArgumentParser(description="Run the LED display. Flags override config.json for this run.")
     p.add_argument("--config", default=str(CONFIG_PATH), help="config file (default: config.json in the repo root)")
-    p.add_argument("--state", choices=choices, help=f"mode or preset to show (config: {run_cfg['state']})")
+    p.add_argument("--activity", choices=choices, help=f"activity or preset to show (config: {run_cfg['activity']})")
     p.add_argument("--widget", action="append", choices=sorted(WIDGETS), dest="widgets",
                    help="widget to draw on top (repeatable); replaces a preset's widgets")
     p.add_argument("--no-widgets", action="store_true", help="drop a preset's widgets")
@@ -56,11 +56,11 @@ def build_parser(config, state_name):
     d.add_argument("--show-bad-pixels", action="store_true",
                    help=f"don't black out bad pixels {disp.get('bad_pixels', [])}")
 
-    s = p.add_argument_group(f"{mode} options")
-    for name, (typ, help_text) in STATES[mode].OPTIONS.items():
+    s = p.add_argument_group(f"{activity} options")
+    for name, (typ, help_text) in ACTIVITIES[activity].OPTIONS.items():
         s.add_argument(flag(name), dest=name, type=typ,
                        # argparse treats % as a format code; strftime options are full of them
-                       help=f"{help_text} (config: {state_cfg.get(name, 'unset')})".replace("%", "%%"))
+                       help=f"{help_text} (config: {activity_cfg.get(name, 'unset')})".replace("%", "%%"))
     return p
 
 
@@ -85,24 +85,24 @@ def service_running(config):
 
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
-    # First pass: find the config file and state, since the state decides which flags exist.
+    # First pass: find the config file and activity, since the activity decides which flags exist.
     pre = argparse.ArgumentParser(add_help=False)
     pre.add_argument("--config", default=str(CONFIG_PATH))
-    pre.add_argument("--state")
+    pre.add_argument("--activity")
     known, _ = pre.parse_known_args(argv)
     config = load_config(known.config)
-    state_name = known.state or config["run"]["state"]
-    mode, _ = resolve_state(config, state_name)
-    if mode not in STATES:
-        sys.exit(f"unknown state {state_name!r}; available: "
-                 f"{', '.join(sorted(set(STATES) | set(config.get('presets', {}))))}")
+    activity_name = known.activity or config["run"]["activity"]
+    activity, _ = resolve_activity(config, activity_name)
+    if activity not in ACTIVITIES:
+        sys.exit(f"unknown activity {activity_name!r}; available: "
+                 f"{', '.join(sorted(set(ACTIVITIES) | set(config.get('presets', {}))))}")
 
-    args = build_parser(config, state_name).parse_args(argv)
+    args = build_parser(config, activity_name).parse_args(argv)
 
     if service_running(config):
         sys.exit("The display service is running and owns the panel. Stop it first:\n"
                  "  sudo systemctl stop pixelgrid\n"
-                 "or send it this mode over the API instead (PUT /state).")
+                 "or send it this activity over the API instead (PUT /activity).")
 
     for key in ("brightness", "mapping", "slowdown", "fps"):
         if getattr(args, key) is not None:
@@ -110,7 +110,7 @@ def main(argv=None):
     if args.show_bad_pixels:
         config["display"]["mask_bad_pixels"] = False
 
-    overrides = {name: getattr(args, name) for name in STATES[mode].OPTIONS
+    overrides = {name: getattr(args, name) for name in ACTIVITIES[activity].OPTIONS
                  if getattr(args, name) is not None}
     widgets = [] if args.no_widgets else args.widgets  # None = the preset's widgets
     duration = resolve_duration(args, config["run"])
@@ -119,7 +119,7 @@ def main(argv=None):
     from pixelgrid.display_manager import DisplayManager
     manager = DisplayManager(config)
     try:
-        entry = manager.make_entry(state_name, overrides, widgets=widgets)
+        entry = manager.make_entry(activity_name, overrides, widgets=widgets)
     except ValueError as e:
         manager.matrix.Clear()
         sys.exit(f"error: {e}")

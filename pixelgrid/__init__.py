@@ -2,5 +2,5 @@
 
 Entry points (run from the repository root):
     python -m pixelgrid.manager   the always-on service (queue, rotation, HTTP API)
-    python -m pixelgrid.run       run one mode directly, for testing
+    python -m pixelgrid.run       run one activity directly, for testing
 """

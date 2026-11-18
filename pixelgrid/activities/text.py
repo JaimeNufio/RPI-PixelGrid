@@ -1,6 +1,6 @@
-"""Tiny BDF bitmap-font renderer shared by text modes (clock, weather, tickers, ...).
+"""Tiny BDF bitmap-font renderer shared by text activities (clock, weather, tickers, ...).
 
-Renders text to a list of pixel offsets so modes can measure the exact ink
+Renders text to a list of pixel offsets so activities can measure the exact ink
 bounds (for precise centering) and draw with plain SetPixel calls.
 Fonts live in fonts/ (public-domain X11 misc-fixed fonts; see fonts/LICENSE-README).
 """

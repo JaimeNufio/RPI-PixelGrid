@@ -1,17 +1,17 @@
-"""Clock widget: the clock mode's exact layout, drawn over any mode.
+"""Clock widget: the clock activity's exact layout, drawn over any activity.
 
-Defaults come from states.clock (INHERITS), so it always matches the clock
-mode, with widgets.clock on top: date_format "" hides the date, and top /
+Defaults come from activities.clock (INHERITS), so it always matches the clock
+activity, with widgets.clock on top: date_format "" hides the date, and top /
 outline / outline_color are widget-only.
 
 The outline is a ring of outline_color pixels around every character, so
-whatever the mode draws underneath (falling snow, ...) never touches the
+whatever the activity draws underneath (falling snow, ...) never touches the
 text.
 """
 from datetime import datetime
 
 from pixelgrid.matrix import SIZE
-from pixelgrid.states.clock import ClockState, parse_color
+from pixelgrid.activities.clock import ClockActivity, parse_color
 from pixelgrid.widgets.base import Widget
 
 MAX_OUTLINE = 3
@@ -21,14 +21,14 @@ class ClockWidget(Widget):
     name = "clock"
     INHERITS = ("clock",)
     OPTIONS = {
-        **ClockState.OPTIONS,
+        **ClockActivity.OPTIONS,
         "top": (int, "row of the top of the time's digits; -1 centers the clock vertically"),
         "outline": (int, f"outline thickness in pixels around every character, 0-{MAX_OUTLINE} (0 = none)"),
         "outline_color": (str, "outline color as #rrggbb (black keeps other content off the text)"),
     }
 
     def validate(self):
-        self.clock = ClockState({k: self.opts[k] for k in ClockState.OPTIONS})  # validates the clock options
+        self.clock = ClockActivity({k: self.opts[k] for k in ClockActivity.OPTIONS})  # validates the clock options
         if not -1 <= self.opts["top"] <= SIZE - 1:
             raise ValueError(f"clock widget: top must be -1 (centered) or 0-{SIZE - 1}")
         if not 0 <= self.opts["outline"] <= MAX_OUTLINE:

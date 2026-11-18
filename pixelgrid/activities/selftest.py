@@ -1,4 +1,4 @@
-"""Self-test mode: a short panel check, run at service startup before anything else.
+"""Self-test activity: a short panel check, run at service startup before anything else.
 
 Phases: solid red, green, blue, white (color_seconds each), a coordinate grid
 (grid_seconds), then the diagonal rainbow (rainbow_seconds). A phase with 0
@@ -7,7 +7,7 @@ seconds is skipped. Bad pixels are NOT masked here, since showing them is the po
 import colorsys
 
 from pixelgrid.matrix import SIZE
-from pixelgrid.states.base import State
+from pixelgrid.activities.base import Activity
 
 COLORS = [(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 255)]
 PALETTE_STEPS = 256
@@ -21,7 +21,7 @@ def build_palette():
     return out
 
 
-class SelfTestState(State):
+class SelfTestActivity(Activity):
     name = "selftest"
     MASK_BAD_PIXELS = False
     OPTIONS = {

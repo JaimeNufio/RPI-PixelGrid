@@ -1,7 +1,7 @@
 """SQLite storage for the display manager: the play queue and a history of what ran when.
 
 One connection shared by the frame loop and the API threads, guarded by a lock.
-Writes only happen on mode changes and queue edits, so WAL mode keeps SD-card
+Writes only happen on activity changes and queue edits, so WAL mode keeps SD-card
 wear low.
 """
 import json
@@ -14,16 +14,16 @@ from pathlib import Path
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS queue (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    state      TEXT NOT NULL,
+    activity   TEXT NOT NULL,
     options    TEXT NOT NULL DEFAULT '{}',
     duration   REAL,                      -- seconds; NULL = until replaced
-    widgets    TEXT NOT NULL DEFAULT '[]', -- [{"name", "options"}] drawn over the mode
+    widgets    TEXT NOT NULL DEFAULT '[]', -- [{"name", "options"}] drawn over the activity
     preset     TEXT,                      -- preset name it came from, if any
     created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS history (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    state      TEXT NOT NULL,
+    activity   TEXT NOT NULL,
     options    TEXT NOT NULL DEFAULT '{}',
     duration   REAL,
     widgets    TEXT NOT NULL DEFAULT '[]',
@@ -65,6 +65,8 @@ class Store:
         """Add columns introduced after a database was first created."""
         for table in ("queue", "history"):
             have = {row["name"] for row in self.conn.execute(f"PRAGMA table_info({table})")}
+            if "state" in have and "activity" not in have:  # "states" were renamed "activities"
+                self.conn.execute(f"ALTER TABLE {table} RENAME COLUMN state TO activity")
             if "widgets" not in have:
                 self.conn.execute(f"ALTER TABLE {table} ADD COLUMN widgets TEXT NOT NULL DEFAULT '[]'")
             if "preset" not in have:
@@ -94,9 +96,9 @@ class Store:
         """Append an entry from DisplayManager.make_entry()."""
         with self.lock:
             cur = self.conn.execute(
-                "INSERT INTO queue (state, options, duration, widgets, preset, created_at) "
+                "INSERT INTO queue (activity, options, duration, widgets, preset, created_at) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
-                (entry["state"], json.dumps(entry["options"]), entry["duration"],
+                (entry["activity"], json.dumps(entry["options"]), entry["duration"],
                  json.dumps(entry.get("widgets") or []), entry.get("preset"), now_iso()))
             return cur.lastrowid
 
@@ -132,12 +134,12 @@ class Store:
 
     # ---- history ----
 
-    def history_start(self, state, options, duration, source, widgets=(), preset=None):
+    def history_start(self, activity, options, duration, source, widgets=(), preset=None):
         with self.lock:
             cur = self.conn.execute(
-                "INSERT INTO history (state, options, duration, widgets, preset, source, started_at) "
+                "INSERT INTO history (activity, options, duration, widgets, preset, source, started_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (state, json.dumps(options), duration, json.dumps(list(widgets)), preset, source, now_iso()))
+                (activity, json.dumps(options), duration, json.dumps(list(widgets)), preset, source, now_iso()))
             return cur.lastrowid
 
     def history_end(self, history_id, reason):

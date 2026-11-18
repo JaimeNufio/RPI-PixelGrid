@@ -1,4 +1,4 @@
-"""Clock mode: the time centered on the panel, AM/PM beside it, the date along the bottom.
+"""Clock activity: the time centered on the panel, AM/PM beside it, the date along the bottom.
 
     +----------------------------------+
     |                                  |
@@ -24,8 +24,8 @@ from datetime import datetime
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pixelgrid.matrix import SIZE
-from pixelgrid.states.base import State
-from pixelgrid.states.text import font_path, ink_bounds, load_font
+from pixelgrid.activities.base import Activity
+from pixelgrid.activities.text import font_path, ink_bounds, load_font
 
 AMPM_GAP = 2            # minimum pixels between the time and AM/PM (2 or 3, see layout)
 FALLBACK_FONT = "4x6"   # used for the date when it doesn't fit in small_font
@@ -55,7 +55,7 @@ def render_line(font, text, space, bump):
     return [(x + 1 if x >= split_x else x, y) for x, y in pixels]
 
 
-class ClockState(State):
+class ClockActivity(Activity):
     name = "clock"
     FPS = 2  # plenty for a minute display; keeps CPU use near zero
     OPTIONS = {

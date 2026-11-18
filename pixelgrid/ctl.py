@@ -59,22 +59,22 @@ def show(obj):
 
 
 def cmd_status(c, args):
-    show({"health": c.call("GET", "/health"), "state": c.call("GET", "/state")})
+    show({"health": c.call("GET", "/health"), "activity": c.call("GET", "/activity")})
 
 
 def cmd_play(c, args):
-    body = {"state": args.state, "options": dict(args.opt or [])}
+    body = {"activity": args.activity, "options": dict(args.opt or [])}
     if args.duration is not None:
         body["duration"] = args.duration
     if args.no_widgets:
         body["widgets"] = []
     elif args.widget:
         body["widgets"] = args.widget
-    show(c.call("PUT", "/state", body))
+    show(c.call("PUT", "/activity", body))
 
 
 def cmd_skip(c, args):
-    show(c.call("POST", "/state/skip"))
+    show(c.call("POST", "/activity/skip"))
 
 
 def cmd_restart(c, args):
@@ -88,10 +88,10 @@ def cmd_restart(c, args):
             new = c.call("GET", "/health", timeout=2)
         except ConnectionError:
             continue
-        if new["pid"] != old["pid"] and new.get("state"):  # new process, and a mode is on screen
-            st = c.call("GET", "/state")
+        if new["pid"] != old["pid"] and new.get("activity"):  # new process, and an activity is on screen
+            st = c.call("GET", "/activity")
             print(f"Back up: pid {new['pid']}, code {new.get('version')}, "
-                  f"playing {st.get('preset') or st.get('state')} ({st.get('source')})")
+                  f"playing {st.get('preset') or st.get('activity')} ({st.get('source')})")
             return
     sys.exit(f"error: service didn't come back within {args.timeout:g}s; "
              "check: systemctl status pixelgrid / journalctl -u pixelgrid -n 50")
@@ -102,12 +102,12 @@ def main(argv=None):
     p.add_argument("--config", default=str(CONFIG_PATH))
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("status", help="process info and what's playing").set_defaults(fn=cmd_status)
-    pl = sub.add_parser("play", help="play a mode or preset right now")
-    pl.add_argument("state")
+    pl = sub.add_parser("play", help="play an activity or preset right now")
+    pl.add_argument("activity")
     pl.add_argument("--duration", type=float, help="seconds; omit to play until replaced")
     pl.add_argument("--widget", action="append", help="widget to draw on top (repeatable)")
     pl.add_argument("--no-widgets", action="store_true", help="drop a preset's widgets")
-    pl.add_argument("--opt", action="append", type=parse_opt, metavar="KEY=VALUE", help="mode option override")
+    pl.add_argument("--opt", action="append", type=parse_opt, metavar="KEY=VALUE", help="activity option override")
     pl.set_defaults(fn=cmd_play)
     sub.add_parser("skip", help="move on to the next item").set_defaults(fn=cmd_skip)
     rs = sub.add_parser("restart", help="restart the service to load new code/config")
