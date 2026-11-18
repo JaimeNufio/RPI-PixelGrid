@@ -2,8 +2,9 @@
 
 An always-on LED display: a Raspberry Pi 4 (8 GB, Debian 13 "trixie") drives an
 Adafruit 64x64 RGB matrix through the Adafruit RGB Matrix HAT. A manager
-service rotates through display modes (`snow`, `clock`), with a
-persistent queue, on-demand interjections over HTTP, and a SQLite play history.
+service rotates through display modes (`snow`, `clock`) with optional overlay widgets
+(`clock`) and named presets (`snow-clock` = snow + clock widget), a persistent queue,
+on-demand interjections over HTTP, and a SQLite play history.
 
 Planned modes: weather/temperature, stock ticker, Christmas/holiday animations.
 
@@ -24,6 +25,7 @@ Run everything from the repository root (`python -m ...`), so `pixelgrid` and `t
 | Path | Role |
 |---|---|
 | `pixelgrid/manager.py` | Service entry point (`python -m pixelgrid.manager`, run by systemd at boot): queue, random rotation, HTTP API, history |
+| `pixelgrid/ctl.py` | API client for the running service, no sudo (`python -m pixelgrid.ctl status/play/skip/restart`); reads port + token from config |
 | `pixelgrid/run.py` | One-off runner for testing a single mode (`python -m pixelgrid.run`); refuses to start while the service is up |
 | `pixelgrid/display_manager.py` | `DisplayManager`: owns the matrix and frame loop, scheduling, bad-pixel masking, crash recovery |
 | `pixelgrid/api.py` | Standard-library HTTP API (port 8080) |
@@ -31,9 +33,13 @@ Run everything from the repository root (`python -m ...`), so `pixelgrid` and `t
 | `pixelgrid/matrix.py` | Builds the `RGBMatrix` (`SIZE` = 64); falls back to `/dev/gpiomem` and software timing when not root |
 | `pixelgrid/config.py` | `ROOT`, `CONFIG_PATH`, `FONT_DIR`, `load_config()`, `resolve()` (config paths are relative to the repo root) |
 | `pixelgrid/states/__init__.py` | Mode registry (`STATES`); register new modes here |
-| `pixelgrid/states/base.py` | `State` base class for every mode |
+| `pixelgrid/component.py` | `Component`: shared base for modes and widgets (options, config defaults + `INHERITS`, lifecycle, `every()`) |
+| `pixelgrid/states/base.py` | `State(Component)`: base for modes (defaults in `states.<name>`) |
 | `pixelgrid/states/snow.py` | Snow mode |
 | `pixelgrid/states/clock.py` | Clock mode: time in an explicit IANA timezone (DST-safe), small AM/PM, date line; centered on visible pixels |
+| `pixelgrid/widgets/base.py` | `Widget(Component)`: overlay drawn on top of any mode (defaults in `widgets.<name>`) |
+| `pixelgrid/widgets/clock.py` | Clock widget: the clock mode's layout (inherits `states.clock`), `top` row (-1 = centered), black `outline` ring so the mode underneath never touches the text |
+| `pixelgrid/widgets/__init__.py` | Widget registry (`WIDGETS`) |
 | `pixelgrid/states/text.py` | BDF font renderer (`load_font`, `render`, `ink_bounds`) shared by text modes |
 | `tools/rainbow_test.py`, `tools/pixel_check.py` | Standalone panel tests (`python -m tools.pixel_check solid`; solid/grid/walk/pixel/circle) |
 | `fonts/` | Public-domain BDF fonts (10x20, 9x18B, 6x10, 5x7, 4x6); add more from `rpi-rgb-led-matrix/fonts/` |
@@ -48,7 +54,13 @@ Run everything from the repository root (`python -m ...`), so `pixelgrid` and `t
 - `manager`: `http_host`/`http_port`, `api_token` (null = no auth), `db_path`,
   `random_modes` (what plays when the queue is empty), `random_duration` (null = until replaced).
 - `run`: defaults for `pixelgrid.run` (`state`, `duration`; `"indefinite"` or 0 = forever).
-- `states.<mode>`: default options for each mode. Every option a mode declares must be present.
+- `states.<mode>`: default options for each mode. Every declared option must be present, either
+  there or inherited: a component with `INHERITS = ("clock",)` takes matching options from
+  `states.clock` first (`Component.defaults()`), so it stays in sync with that mode.
+- `widgets.<widget>`: widget defaults (on top of inherited ones). `widgets.clock` sets
+  `date_format: ""`, `top`, `outline`, `outline_color`.
+- `presets.<name>`: `{"state", "options"?, "widgets"?}`, a named mode + widgets combination usable
+  anywhere a mode name is (API, queue, `random_modes`, `pixelgrid.run --state`).
 
 ## Scheduling rules
 
@@ -67,10 +79,17 @@ If `api_token` is set, send `Authorization: Bearer <token>`.
 
 - `GET /modes`: modes, options, config defaults
 - `GET /state`: what's playing (with `remaining` seconds when timed)
-- `PUT /state` with `{"state", "options"?, "duration"?}`: play now
+- `GET /widgets`: widgets, options, config defaults (`/modes` also lists presets)
+- `PUT /state` with `{"state", "options"?, "duration"?, "widgets"?}`: play now. `state` may be a
+  preset. `widgets` is a list of names or `{"name", "options"}`; omitted = the preset's widgets,
+  `[]` = none.
 - `POST /state/skip`: move on to the next item
 - `GET /queue`, `POST /queue`, `DELETE /queue`, `DELETE /queue/<id>`: manage the queue
-- `GET /history?limit=N`: recent plays with `source` (random/queue/api/cli) and `end_reason`
+- `GET /history?limit=N`: recent plays with `source` (random/queue/api/cli/resume) and `end_reason`
+- `GET /health`: pid, start time, loaded code version (git short hash, `+dirty` if uncommitted)
+- `POST /admin/restart`: clean stop + exit code 75; systemd (`Restart=on-failure`) starts a fresh
+  process with the latest code and config. The current item resumes with its remaining time
+  (saved in the `meta` table), and history records `restart`.
 
 `options` holds only overrides; config defaults fill in the rest at play time.
 
@@ -79,6 +98,8 @@ If `api_token` is set, send `Authorization: Bearer <token>`.
 1. Create `pixelgrid/states/<name>.py` with a `State` subclass. Set `name`, `OPTIONS = {opt: (type, help)}`,
    and optionally `FPS` (e.g. 2 for a clock). Implement `update(dt)` and `draw(canvas)`, and
    optionally `enter()`/`exit()` and `validate()` (raise `ValueError` for bad option combinations).
+   To overlay something on other modes, write a widget (`pixelgrid/widgets/`, same lifecycle) and
+   combine it with a mode in a preset, rather than writing a combined mode.
 2. Keep `__init__` cheap with no side effects: the manager builds throwaway instances to
    validate API requests. Do setup in `enter()`.
 3. Fetch network data with `self.every(seconds, fn)` (a background thread that stops on
@@ -99,8 +120,15 @@ systemctl status pixelgrid
 journalctl -u pixelgrid -f
 sudo systemctl stop pixelgrid          # required before pixelgrid.run or the tools
 
+# Control the running service (no sudo)
+.venv/bin/python -m pixelgrid.ctl status
+.venv/bin/python -m pixelgrid.ctl play snow-clock            # --duration S, --widget W, --opt k=v
+.venv/bin/python -m pixelgrid.ctl restart                    # load new code/config; waits until back up
+
 # One-off test of a mode (service must be stopped)
 sudo .venv/bin/python -m pixelgrid.run --state snow --duration 60 --rate 10
+sudo .venv/bin/python -m pixelgrid.run --state snow-clock               # preset
+sudo .venv/bin/python -m pixelgrid.run --state snow --widget clock      # any mode + widget
 .venv/bin/python -m pixelgrid.run --help          # every flag with its config default
 .venv/bin/python -m tools.pixel_check grid          # panel diagnostics
 ```
@@ -115,6 +143,10 @@ priority. That permission is lost whenever apt updates python3.13; check with `g
 - Claude can't use `sudo` (it needs a password, and `!` commands have no terminal for the
   prompt). Give the user root commands to run in their own terminal. Interactive editors
   don't work through `!` either.
+- After changing code or config, reload the service with `python -m pixelgrid.ctl restart` (no sudo;
+  needs the service to already be running code that has `/admin/restart`). Unit-file changes still
+  need `sudo systemctl daemon-reload` by the user.
+- To show something on the panel while the service runs, use `pixelgrid.ctl play`, not `pixelgrid.run`.
 - Only one program can drive the panel. Stop the service before running anything on the hardware.
 - Test logic without the hardware by replacing `display_manager.build_matrix` with a fake
   matrix/canvas (`Clear`, `SetPixel`, `CreateFrameCanvas`, `SwapOnVSync`) and driving the
