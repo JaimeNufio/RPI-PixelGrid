@@ -17,6 +17,11 @@ if [ -d "$gitdir/rebase-merge" ] || [ -d "$gitdir/rebase-apply" ] || [ -f "$gitd
 fi
 
 # Only restart when the commit touched files the service loads.
+# docs/API.md's activity reference is generated from the code; warn when it has drifted.
+if [ -x .venv/bin/python ] && ! .venv/bin/python -m tools.api_docs --check >/dev/null 2>&1; then
+    echo "post-commit: warning: docs/API.md is out of date; run: .venv/bin/python -m tools.api_docs"
+fi
+
 changed="$(git diff-tree --root --no-commit-id --name-only -r "$ref" -- pixelgrid fonts)"
 if [ -z "$changed" ]; then
     echo "post-commit: no service code changed; display service not restarted"

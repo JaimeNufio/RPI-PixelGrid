@@ -1,4 +1,4 @@
-"""Component: the shared base for display modes (State) and overlays (Widget).
+"""Component: the shared base for display activities (Activity) and overlays (Widget).
 
 Lifecycle, driven by the DisplayManager on the frame-loop thread:
 
@@ -9,18 +9,26 @@ Lifecycle, driven by the DisplayManager on the frame-loop thread:
 
 Class attributes:
     name      used in config.json, the CLI and the API
-    SECTION   config section holding its defaults: "states" or "widgets"
+    SECTION   config section holding its defaults: "activities" or "widgets"
     OPTIONS   {option: (type, help)}; default values live in config.json
-    INHERITS  names of *modes* whose config defaults are reused, e.g. ("clock",).
-              Matching options come from states.<parent> first, then this
+    INHERITS  names of *activities* whose config defaults are reused, e.g. ("clock",).
+              Matching options come from activities.<parent> first, then this
               component's own section on top.
-    FPS       frame rate a mode needs, or None for the display default
+    FPS       frame rate an activity needs, or None for the display default
 
 Outside data (weather, stocks) should be fetched with self.every(seconds, fn)
 so slow network calls never stall the display.
 """
 import threading
 import traceback
+
+
+def optional(typ):
+    """Option type that also accepts null (None), e.g. optional(float) for "<screen>_seconds"."""
+    def convert(value):
+        return None if value is None else typ(value)
+    convert.__name__ = f"{typ.__name__} or null"
+    return convert
 
 
 class Component:
@@ -35,7 +43,7 @@ class Component:
         """Config defaults for this component, from the full config dict."""
         merged = {}
         for parent in cls.INHERITS:
-            merged.update({k: v for k, v in config.get("states", {}).get(parent, {}).items() if k in cls.OPTIONS})
+            merged.update({k: v for k, v in config.get("activities", {}).get(parent, {}).items() if k in cls.OPTIONS})
         merged.update(config.get(cls.SECTION, {}).get(cls.name, {}))
         return merged
 

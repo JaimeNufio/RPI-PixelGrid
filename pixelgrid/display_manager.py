@@ -1,20 +1,21 @@
-"""DisplayManager: owns the matrix, runs one mode at a time, and decides what plays next.
+"""DisplayManager: owns the matrix, runs one activity at a time, and decides what plays next.
 
-Scheduling (service mode):
+Scheduling (service):
   - Each item plays for its duration, or indefinitely if it has none.
   - An indefinite item gives way as soon as something is waiting in the queue.
-  - When an item ends, the next queue item plays; if the queue is empty, a
-    random mode from config "manager" -> "random_modes" plays.
-  - interject() (HTTP PUT /state) takes over immediately; when it ends, the
+  - When an item ends, the next queue item plays; if the queue is empty, the
+    next item of config "manager" -> "rotation" plays (in order, cycling forever;
+    "shuffle": true picks randomly instead, never the same twice in a row).
+  - interject() (HTTP PUT /activity) takes over immediately; when it ends, the
     queue resumes.
 
-An entry is a mode plus optional widgets drawn on top of it:
-    {"state": "snow", "options": {...}, "duration": 60,
+An entry is an activity plus optional widgets drawn on top of it:
+    {"activity": "snow", "options": {...}, "duration": 60,
      "widgets": [{"name": "clock", "options": {"top": 4}}], "preset": None}
-A preset (config "presets") is a named mode + widgets combination, usable
-anywhere a mode name is (API, queue, random_modes, run.py).
+A preset (config "presets") is a named activity + widgets combination, usable
+anywhere an activity name is (API, queue, rotation, run.py).
 
-All matrix and state work happens on the frame-loop thread. Other threads
+All matrix and activity work happens on the frame-loop thread. Other threads
 (the HTTP API) only call interject(), skip(), notify_queue() and snapshot().
 """
 import queue
@@ -27,12 +28,12 @@ from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 from pixelgrid.matrix import build_matrix
-from pixelgrid.states import STATES
+from pixelgrid.activities import ACTIVITIES
 from pixelgrid.widgets import WIDGETS
 
 
 class DisplayManager:
-    def __init__(self, config, store=None, registry=STATES, widget_registry=WIDGETS):
+    def __init__(self, config, store=None, registry=ACTIVITIES, widget_registry=WIDGETS):
         self.config = config
         self.store = store
         self.registry = registry
@@ -47,14 +48,15 @@ class DisplayManager:
                                                    slowdown=display["slowdown"]),
                                    display.get("matrix_options", {}))
         self.canvas = self.matrix.CreateFrameCanvas()
-        self.state = None
+        self.activity = None
         self.widgets = []
         self.current = None              # what's playing, for snapshot(); guarded by _lock
         self._lock = threading.Lock()
         self._commands = queue.Queue()   # from API threads to the frame loop
         self.queue_waiting = threading.Event()
         self._stop = False
-        self._last_random = None
+        self._rotation_next = 0          # index of the next rotation item
+        self._last_rotation = None
         self.restart_requested = False
         self._pending_resume = None  # item to resume after the startup selftest
         self.started_at = datetime.now().isoformat(timespec="seconds")
@@ -65,23 +67,23 @@ class DisplayManager:
         return sorted(set(self.registry) | set(self.presets))
 
     def make_entry(self, name, options=None, duration=None, widgets=None):
-        """Validate a request to play a mode or preset. Returns a normalized entry:
-        {"state", "preset", "options", "duration", "widgets": [{"name", "options"}]}.
+        """Validate a request to play an activity or preset. Returns a normalized entry:
+        {"activity", "preset", "options", "duration", "widgets": [{"name", "options"}]}.
         options hold only overrides; config defaults are merged in at play time.
         widgets=None means the preset's widgets (or none); [] means no widgets."""
         if not name:
-            raise ValueError("'state' is required")
+            raise ValueError("'activity' is required")
         preset = None
         if name in self.presets:
             preset, p = name, self.presets[name]
-            name = p.get("state")
+            name = p.get("activity")
             if name not in self.registry:
-                raise ValueError(f"preset {preset!r} uses unknown state {name!r}")
+                raise ValueError(f"preset {preset!r} uses unknown activity {name!r}")
             options = {**p.get("options", {}), **(options or {})}
             if widgets is None:
                 widgets = p.get("widgets", [])
         elif name not in self.registry:
-            raise ValueError(f"unknown state {name!r}; available: {', '.join(self.available())}")
+            raise ValueError(f"unknown activity {name!r}; available: {', '.join(self.available())}")
         if options is None:
             options = {}
         if not isinstance(options, dict):
@@ -97,7 +99,7 @@ class DisplayManager:
         widget_list = self._normalize_widgets(widgets or [])
         for w in widget_list:
             self._build_widget(w)  # raises ValueError if invalid
-        return {"state": name, "preset": preset, "options": options, "duration": duration,
+        return {"activity": name, "preset": preset, "options": options, "duration": duration,
                 "widgets": widget_list}
 
     def _normalize_widgets(self, widgets):
@@ -140,7 +142,7 @@ class DisplayManager:
         """What's playing right now (thread-safe)."""
         with self._lock:
             if self.current is None:
-                return {"state": None}
+                return {"activity": None}
             cur = {k: v for k, v in self.current.items() if not k.startswith("_")}
             if cur["duration"] is not None:
                 cur["remaining"] = round(max(0.0, cur["duration"] - (time.monotonic() - self.current["_t0"])), 1)
@@ -160,11 +162,12 @@ class DisplayManager:
     # ---- switching (frame-loop thread only) ----
 
     def _switch(self, entry, source, reason):
-        name = entry["state"]
+        name = entry["activity"]
         label = entry.get("preset") or name
         widget_list = entry.get("widgets") or []
         try:
             new = self.registry[name](self._merged(self.registry[name], entry["options"]))
+            new.duration = entry["duration"]  # lets activities with screens split the time
             new_widgets = [self._build_widget(w) for w in widget_list]
         except (KeyError, ValueError) as e:
             print(f"Manager: can't play {label!r}: {e}", flush=True)
@@ -182,7 +185,7 @@ class DisplayManager:
                 part.stop_workers()
             new.stop_workers()
             return False
-        self.state = new
+        self.activity = new
         self.widgets = new_widgets
         duration = entry["duration"]
         history_id = (self.store.history_start(name, entry["options"], duration, source,
@@ -191,7 +194,7 @@ class DisplayManager:
         t0 = time.monotonic()
         with self._lock:
             self.current = {
-                "state": name, "preset": entry.get("preset"), "widgets": widget_list,
+                "activity": name, "preset": entry.get("preset"), "widgets": widget_list,
                 "options": entry["options"], "duration": duration, "source": source,
                 "started_at": datetime.now().isoformat(timespec="seconds"),
                 "ends_at": (datetime.now() + timedelta(seconds=duration)).isoformat(timespec="seconds")
@@ -206,9 +209,9 @@ class DisplayManager:
         return True
 
     def _end_current(self, reason):
-        if self.state is None:
+        if self.activity is None:
             return
-        for part in [self.state, *self.widgets]:
+        for part in [self.activity, *self.widgets]:
             try:
                 part.exit()
             except Exception:
@@ -217,35 +220,45 @@ class DisplayManager:
         self.widgets = []
         if self.store and self.current and self.current["_history"] is not None:
             self.store.history_end(self.current["_history"], reason)
-        self.state = None
+        self.activity = None
         with self._lock:
             self.current = None
 
     def _next(self, reason):
         """Play the item saved by a requested restart, else the next queue item,
-        else a random mode."""
+        else the next rotation item."""
         if self._resume(reason):
             return
         while self.store and (item := self.store.queue_pop()) is not None:
             if self._switch(item, "queue", reason):
                 return
-        self._play_random(reason)
+        self._play_rotation(reason)
 
-    def _play_random(self, reason):
-        mcfg = self.config.get("manager", {})
-        choices = [m for m in mcfg.get("random_modes", sorted(self.registry))
-                   if m in self.registry or m in self.presets]
-        choices = choices or sorted(self.registry)
-        if len(choices) > 1 and self._last_random in choices:
-            choices.remove(self._last_random)  # avoid repeating the same mode back to back
-        name = random.choice(choices)
-        self._last_random = name
+    def rotation(self):
+        """Config manager.rotation as [{"activity", "duration"?, "options"?, "widgets"?}].
+        A bare name is shorthand for {"activity": name} (plays until replaced)."""
+        items = self.config.get("manager", {}).get("rotation") or ["snow-clock" if "snow-clock" in self.presets
+                                                                    else sorted(self.registry)[0]]
+        return [{"activity": i} if isinstance(i, str) else i for i in items]
+
+    def rotation_entry(self, item):
+        return self.make_entry(item.get("activity"), item.get("options"), item.get("duration"), item.get("widgets"))
+
+    def _play_rotation(self, reason):
+        items = self.rotation()
+        if self.config.get("manager", {}).get("shuffle"):
+            choices = [i for i in range(len(items)) if i != self._last_rotation] or [0]
+            index = random.choice(choices)
+        else:
+            index = self._rotation_next % len(items)
+        self._rotation_next, self._last_rotation = index + 1, index
+        item = items[index]
         try:
-            entry = self.make_entry(name, duration=mcfg.get("random_duration"))
+            entry = self.rotation_entry(item)
         except ValueError as e:
-            raise RuntimeError(f"random mode {name!r} is invalid: {e}") from None
-        if not self._switch(entry, "random", reason):
-            raise RuntimeError(f"random mode {name!r} can't start; check config.json")
+            raise RuntimeError(f"rotation item {item!r} is invalid: {e}") from None
+        if not self._switch(entry, "rotation", reason):
+            raise RuntimeError(f"rotation item {item!r} can't start; check config.json")
 
     def _schedule(self):
         while True:
@@ -257,7 +270,7 @@ class DisplayManager:
                 self._switch(arg, "api", "interrupted")
             elif cmd == "skip":
                 self._next("skipped")
-        if self.state is None:
+        if self.activity is None:
             self._next("error")
             return
         cur = self.current
@@ -272,7 +285,7 @@ class DisplayManager:
     # ---- run loops ----
 
     def run_service(self):
-        """Run forever: queue first, else a random mode; obey interjections and skips.
+        """Run forever: queue first, else the rotation; obey interjections and skips.
         Starts with the selftest (config manager.startup_selftest); after a requested
         restart, whatever was playing resumes next."""
         self._pending_resume = self.store.meta_pop("resume") if self.store else None
@@ -296,8 +309,8 @@ class DisplayManager:
         if not (self.store and self.current):
             return
         origin = self.current["_origin"]
-        if origin in ("random", "selftest"):
-            return  # not a deliberate choice: pick fresh from the (possibly updated) config
+        if origin in ("rotation", "random", "selftest"):
+            return  # not a deliberate choice: start the (possibly updated) rotation fresh
         entry = dict(self.current["_entry"])
         entry["origin"] = origin
         if entry["duration"] is not None:
@@ -313,8 +326,8 @@ class DisplayManager:
             return False
         origin = entry.get("origin")
         try:
-            entry = self.make_entry(entry.get("preset") or entry["state"], entry.get("options"),
-                                    entry.get("duration"), entry.get("widgets"))
+            name = entry.get("preset") or entry.get("activity") or entry["state"]  # "state": saved before the rename
+            entry = self.make_entry(name, entry.get("options"), entry.get("duration"), entry.get("widgets"))
             entry["origin"] = origin
         except (KeyError, ValueError) as e:
             print(f"Manager: can't resume after restart ({e}); starting fresh", flush=True)
@@ -325,7 +338,7 @@ class DisplayManager:
         """Play one entry for `duration` seconds (None = until Ctrl+C / SIGTERM)."""
         entry = {**entry, "duration": duration}  # so logs and snapshot() show the real run length
         if not self._switch(entry, "cli", "start"):
-            raise ValueError(f"can't play {entry['state']!r}")
+            raise ValueError(f"can't play {entry['activity']!r}")
         self._loop(service=False, deadline=None if duration is None else time.monotonic() + duration)
 
     def _loop(self, service, deadline=None):
@@ -336,24 +349,24 @@ class DisplayManager:
                 start = time.monotonic()
                 if service:
                     self._schedule()
-                fps = (self.state.FPS if self.state and self.state.FPS else None) or self.default_fps
+                fps = (self.activity.FPS if self.activity and self.activity.FPS else None) or self.default_fps
                 frame_time = 1.0 / fps
                 try:
-                    self.state.update(frame_time)
+                    self.activity.update(frame_time)
                     for w in self.widgets:
                         w.update(frame_time)
                     self.canvas.Clear()
-                    self.state.draw(self.canvas)
+                    self.activity.draw(self.canvas)
                     for w in self.widgets:
                         w.draw(self.canvas)
                 except Exception:
                     if not service:
                         raise
-                    print(f"Manager: {self.current and self.current['state']} crashed; moving on:", flush=True)
+                    print(f"Manager: {self.current and self.current['activity']} crashed; moving on:", flush=True)
                     traceback.print_exc()
                     self.canvas.Clear()
                     self._end_current("error")
-                if not self.state or self.state.MASK_BAD_PIXELS:
+                if not self.activity or self.activity.MASK_BAD_PIXELS:
                     for x, y in self.bad_pixels:
                         self.canvas.SetPixel(x, y, 0, 0, 0)
                 self.canvas = self.matrix.SwapOnVSync(self.canvas)

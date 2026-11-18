@@ -13,15 +13,18 @@
     "http_port": 8080,
     "api_token": null,
     "db_path": "data/pixelgrid.db",
-    "random_modes": ["snow-clock"],
-    "random_duration": null,
+    "rotation": [
+      {"activity": "snow-clock", "duration": 300},
+      {"activity": "weather", "duration": 120}
+    ],
+    "shuffle": false,
     "startup_selftest": true
   },
   "run": {
-    "state": "snow",
+    "activity": "snow",
     "duration": 3600
   },
-  "states": {
+  "activities": {
     "snow": {
       "rate": 6,
       "speed": 4,
@@ -49,6 +52,30 @@
       "color_seconds": 1,
       "grid_seconds": 2,
       "rainbow_seconds": 4
+    },
+    "weather": {
+      "latitude": 40.5068,
+      "longitude": -74.2654,
+      "units": "fahrenheit",
+      "refresh": 600,
+      "icon_set": "twemoji",
+      "icon_size": 20,
+      "icon_gap": 3,
+      "hours": 2,
+      "hour_icon_set": "pixel",
+      "hour_icon_size": 9,
+      "font": "10x20",
+      "small_font": "4x6",
+      "color": "#ffffff",
+      "label_color": "#9a9ac0",
+      "demo": 0,
+      "now_seconds": null,
+      "forecast_seconds": null,
+      "days": 3,
+      "forecast_icon_set": "twemoji",
+      "forecast_icon_size": 16,
+      "forecast_font": "5x7",
+      "low_color": "#7080a8"
     }
   },
   "widgets": {
@@ -60,8 +87,10 @@
     }
   },
   "presets": {
+    "weather-test-now": {"activity": "weather", "options": {"demo": 3, "forecast_seconds": 0}},
+    "weather-test-forecast": {"activity": "weather", "options": {"demo": 3, "now_seconds": 0}},
     "snow-clock": {
-      "state": "snow",
+      "activity": "snow",
       "widgets": ["clock"]
     }
   }
