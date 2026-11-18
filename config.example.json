@@ -1,0 +1,35 @@
+{
+  "display": {
+    "brightness": 60,
+    "mapping": "adafruit-hat-pwm",
+    "slowdown": 5,
+    "fps": 24,
+    "mask_bad_pixels": true,
+    "bad_pixels": [[32, 5]]
+  },
+  "manager": {
+    "http_host": "0.0.0.0",
+    "http_port": 8080,
+    "api_token": null,
+    "db_path": "data/pixelgrid.db",
+    "random_modes": ["snow"],
+    "random_duration": null
+  },
+  "run": {
+    "state": "snow",
+    "duration": 3600
+  },
+  "states": {
+    "snow": {
+      "rate": 6,
+      "speed": 4,
+      "drift": 0.25,
+      "max_step": 1,
+      "mound": 6,
+      "shift_at": 0.15,
+      "shift_rows": 5,
+      "shift_interval": 2,
+      "max_pile": 40
+    }
+  }
+}

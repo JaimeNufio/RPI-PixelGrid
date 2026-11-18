@@ -1,0 +1,26 @@
+# Local config: holds the API token. Copy config.example.json to start one.
+config.json
+
+# Runtime data: SQLite queue/history (plus WAL files)
+data/
+*.db
+*.db-wal
+*.db-shm
+*.log
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Downloaded third-party source, rebuilt per machine (see CLAUDE.md "Fresh setup")
+rpi-rgb-led-matrix/
+build-deps/
+
+# Editor / OS / local tool settings
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+.claude/settings.local.json
