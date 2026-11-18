@@ -7,7 +7,7 @@ Fonts live in fonts/ (public-domain X11 misc-fixed fonts; see fonts/LICENSE-READ
 from functools import lru_cache
 from pathlib import Path
 
-FONT_DIR = Path(__file__).resolve().parent.parent / "fonts"
+from pixelgrid.config import FONT_DIR
 
 
 def font_path(name):
@@ -17,34 +17,43 @@ def font_path(name):
 
 
 class BDFFont:
+    """Glyph bitmaps are decoded on first use: the bundled fonts hold thousands of
+    Unicode glyphs (10x20 has 5,205), and decoding them all up front takes ~1.5s on a Pi 4."""
+
     def __init__(self, path):
-        self.glyphs = {}  # codepoint -> (advance, [(x, y), ...]) with y relative to the baseline (up is negative)
+        self._raw = {}     # codepoint -> (advance, bbx, [hex rows]), straight from the file
+        self._cache = {}   # codepoint -> (advance, [(x, y), ...]) with y relative to the baseline (up is negative)
         self._parse(Path(path))
 
     def _parse(self, path):
-        code = advance = None
-        bbx = None
-        rows = None
+        code = advance = bbx = rows = None
         with open(path, encoding="latin-1") as f:
             for line in f:
-                parts = line.split()
-                if not parts:
-                    continue
-                key = parts[0]
-                if key == "ENCODING":
-                    code = int(parts[1])
-                elif key == "DWIDTH":
-                    advance = int(parts[1])
-                elif key == "BBX":
-                    bbx = tuple(int(v) for v in parts[1:5])  # width, height, x offset, y offset
-                elif key == "BITMAP":
+                if rows is not None:
+                    if line.startswith("ENDCHAR"):
+                        if code is not None and code >= 0 and bbx:
+                            self._raw[code] = (advance, bbx, rows)
+                        code = advance = bbx = rows = None
+                    else:
+                        rows.append(line.strip())
+                elif line.startswith("ENCODING"):
+                    code = int(line.split()[1])
+                elif line.startswith("DWIDTH"):
+                    advance = int(line.split()[1])
+                elif line.startswith("BBX"):
+                    bbx = tuple(int(v) for v in line.split()[1:5])  # width, height, x offset, y offset
+                elif line.startswith("BITMAP"):
                     rows = []
-                elif key == "ENDCHAR":
-                    if code is not None and code >= 0 and bbx:
-                        self.glyphs[code] = (advance, self._pixels(bbx, rows or []))
-                    code = advance = bbx = rows = None
-                elif rows is not None:
-                    rows.append(key)
+
+    def glyph(self, code):
+        """(advance, pixels) for a codepoint, or None if the font doesn't have it."""
+        if code not in self._cache:
+            raw = self._raw.get(code)
+            if raw is None:
+                return None
+            advance, bbx, rows = raw
+            self._cache[code] = (advance, self._pixels(bbx, rows))
+        return self._cache[code]
 
     @staticmethod
     def _pixels(bbx, rows):
@@ -64,12 +73,12 @@ class BDFFont:
         space: width in pixels for ' ' (default: the font's own, usually a full cell)."""
         pixels = []
         pen = 0
-        fallback = self.glyphs.get(ord("?"), (0, []))
+        fallback = self.glyph(ord("?")) or (0, [])
         for ch in text:
             if ch == " " and space is not None:
                 pen += space
                 continue
-            advance, glyph = self.glyphs.get(ord(ch), fallback)
+            advance, glyph = self.glyph(ord(ch)) or fallback
             pixels.extend((pen + x, y) for x, y in glyph)
             pen += advance
         return pixels

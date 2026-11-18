@@ -12,39 +12,42 @@ Planned modes: weather/temperature, stock ticker, Christmas/holiday animations.
 - The GPIO4–GPIO18 jumper is soldered, so always use `mapping: adafruit-hat-pwm`.
 - **Dead green LED at x=32, y=5** (0-indexed, top-left origin): white shows purple there.
   It's listed in `config.json` -> `display.bad_pixels`, and the manager draws it black in
-  every mode. See `PANEL_NOTES.md`.
+  every mode. See `docs/PANEL_NOTES.md`.
 - `gpio_slowdown` 4–5 works on this Pi 4.
 - Onboard audio is disabled (`dtparam=audio=off`, and `snd_bcm2835` is blacklisted) because
   it conflicts with the matrix driver's PWM timer.
 
 ## Layout
 
-| File | Role |
+Run everything from the repository root (`python -m ...`), so `pixelgrid` and `tools` import as packages.
+
+| Path | Role |
 |---|---|
-| `manager.py` | Service entry point (run by systemd at boot): queue, random rotation, HTTP API, history |
-| `display_manager.py` | `DisplayManager`: owns the matrix and frame loop, scheduling, bad-pixel masking, crash recovery |
-| `api.py` | Standard-library HTTP API (port 8080) |
-| `store.py` | SQLite queue + history (`data/pixelgrid.db`, WAL mode) |
-| `states/base.py` | `State` base class for every mode |
-| `states/snow.py` | Snow mode |
-| `states/clock.py` | Clock mode: HH:MM in an explicit IANA timezone (DST-safe), centered on its visible pixels |
-| `states/text.py` | BDF font renderer (`load_font`, `render`, `ink_bounds`) shared by text modes |
-| `fonts/` | Public-domain BDF fonts copied from the library (10x20, 9x18B, 6x10); add more from `rpi-rgb-led-matrix/fonts/` |
-| `states/__init__.py` | Mode registry (`STATES`); register new modes here |
-| `run.py` | One-off runner for testing a single mode; refuses to start while the service is up |
-| `snowfall.py` | Old shortcut for `run.py --state snow` |
-| `matrix_setup.py` | Builds the `RGBMatrix`; falls back to `/dev/gpiomem` and software timing when not root |
-| `rainbow_test.py`, `pixel_check.py` | Standalone panel tests (rainbow; solid/grid/walk/pixel/circle diagnostics) |
+| `pixelgrid/manager.py` | Service entry point (`python -m pixelgrid.manager`, run by systemd at boot): queue, random rotation, HTTP API, history |
+| `pixelgrid/run.py` | One-off runner for testing a single mode (`python -m pixelgrid.run`); refuses to start while the service is up |
+| `pixelgrid/display_manager.py` | `DisplayManager`: owns the matrix and frame loop, scheduling, bad-pixel masking, crash recovery |
+| `pixelgrid/api.py` | Standard-library HTTP API (port 8080) |
+| `pixelgrid/store.py` | SQLite queue + history (`data/pixelgrid.db`, WAL mode) |
+| `pixelgrid/matrix.py` | Builds the `RGBMatrix` (`SIZE` = 64); falls back to `/dev/gpiomem` and software timing when not root |
+| `pixelgrid/config.py` | `ROOT`, `CONFIG_PATH`, `FONT_DIR`, `load_config()`, `resolve()` (config paths are relative to the repo root) |
+| `pixelgrid/states/__init__.py` | Mode registry (`STATES`); register new modes here |
+| `pixelgrid/states/base.py` | `State` base class for every mode |
+| `pixelgrid/states/snow.py` | Snow mode |
+| `pixelgrid/states/clock.py` | Clock mode: time in an explicit IANA timezone (DST-safe), small AM/PM, date line; centered on visible pixels |
+| `pixelgrid/states/text.py` | BDF font renderer (`load_font`, `render`, `ink_bounds`) shared by text modes |
+| `tools/rainbow_test.py`, `tools/pixel_check.py` | Standalone panel tests (`python -m tools.pixel_check solid`; solid/grid/walk/pixel/circle) |
+| `fonts/` | Public-domain BDF fonts (10x20, 9x18B, 6x10, 5x7, 4x6); add more from `rpi-rgb-led-matrix/fonts/` |
+| `deploy/pixelgrid.service` | systemd unit; runs `python -m pixelgrid.manager` as root |
+| `deploy/setup_root.sh` | One-time root setup (apt packages, disable audio) |
+| `docs/PANEL_NOTES.md` | Known bad pixels on this panel |
 | `config.json` | Local config, **gitignored** (holds `api_token`). Template: `config.example.json` |
-| `pixelgrid.service` | systemd unit; runs `manager.py` as root |
-| `setup_root.sh` | One-time root setup (apt packages, disable audio) |
 
 ## Config (`config.json`)
 
 - `display`: brightness, mapping, slowdown, default fps, `bad_pixels`.
 - `manager`: `http_host`/`http_port`, `api_token` (null = no auth), `db_path`,
   `random_modes` (what plays when the queue is empty), `random_duration` (null = until replaced).
-- `run`: defaults for `run.py` (`state`, `duration`; `"indefinite"` or 0 = forever).
+- `run`: defaults for `pixelgrid.run` (`state`, `duration`; `"indefinite"` or 0 = forever).
 - `states.<mode>`: default options for each mode. Every option a mode declares must be present.
 
 ## Scheduling rules
@@ -73,32 +76,33 @@ If `api_token` is set, send `Authorization: Bearer <token>`.
 
 ## Adding a mode
 
-1. Create `states/<name>.py` with a `State` subclass. Set `name`, `OPTIONS = {opt: (type, help)}`,
+1. Create `pixelgrid/states/<name>.py` with a `State` subclass. Set `name`, `OPTIONS = {opt: (type, help)}`,
    and optionally `FPS` (e.g. 2 for a clock). Implement `update(dt)` and `draw(canvas)`, and
    optionally `enter()`/`exit()` and `validate()` (raise `ValueError` for bad option combinations).
 2. Keep `__init__` cheap with no side effects: the manager builds throwaway instances to
    validate API requests. Do setup in `enter()`.
 3. Fetch network data with `self.every(seconds, fn)` (a background thread that stops on
    exit), never in `update()`/`draw()`.
-4. Register it in `states/__init__.py`, add its defaults under `states.<name>` in **both**
+4. Register it in `pixelgrid/states/__init__.py`, add its defaults under `states.<name>` in **both**
    `config.json` and `config.example.json`, and add it to `manager.random_modes` if it
    should rotate in.
 5. `draw()` gets an already-cleared canvas; the manager masks bad pixels after it.
-6. For text, use `states/text.py` (`load_font(name).render(text)` gives pixel offsets, so you
-   can measure the ink bounds and center exactly). See `states/clock.py`. Fonts go in `fonts/`.
+6. For text, use `pixelgrid/states/text.py` (`load_font(name).render(text)` gives pixel offsets, so you
+   can measure the ink bounds and center exactly). See `pixelgrid/states/clock.py`. Fonts go in `fonts/`.
 
 ## Running
 
 ```bash
 # Service (start at boot)
-sudo cp pixelgrid.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now pixelgrid
+sudo cp deploy/pixelgrid.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now pixelgrid
 systemctl status pixelgrid
 journalctl -u pixelgrid -f
-sudo systemctl stop pixelgrid          # required before run.py or the test scripts
+sudo systemctl stop pixelgrid          # required before pixelgrid.run or the tools
 
 # One-off test of a mode (service must be stopped)
-sudo .venv/bin/python run.py --state snow --duration 60 --rate 10
-.venv/bin/python run.py --help          # every flag with its config default
+sudo .venv/bin/python -m pixelgrid.run --state snow --duration 60 --rate 10
+.venv/bin/python -m pixelgrid.run --help          # every flag with its config default
+.venv/bin/python -m tools.pixel_check grid          # panel diagnostics
 ```
 
 Without root, the scripts still run through `/dev/gpiomem` (the user is in the `gpio` group),
@@ -120,7 +124,7 @@ priority. That permission is lost whenever apt updates python3.13; check with `g
 ## Fresh setup (new SD card / clone)
 
 ```bash
-sudo bash setup_root.sh                                   # apt deps, disable audio; reboot after
+sudo bash deploy/setup_root.sh                            # apt deps, disable audio; reboot after
 cp config.example.json config.json                        # then set api_token
 python3 -m venv .venv
 curl -sL https://github.com/hzeller/rpi-rgb-led-matrix/archive/refs/heads/master.tar.gz | tar xz

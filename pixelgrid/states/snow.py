@@ -14,8 +14,8 @@ starting mound.
 import math
 import random
 
-from matrix_setup import SIZE
-from states.base import State
+from pixelgrid.matrix import SIZE
+from pixelgrid.states.base import State
 
 AREA = SIZE * SIZE
 FLAKE_COLOR = (255, 255, 255)

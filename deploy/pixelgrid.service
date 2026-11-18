@@ -7,7 +7,7 @@ Wants=network-online.target
 Type=simple
 # Runs as root for hardware PWM timing and real-time priority (least flicker).
 WorkingDirectory=/home/jnufio/pixelgrid
-ExecStart=/home/jnufio/pixelgrid/.venv/bin/python -u /home/jnufio/pixelgrid/manager.py
+ExecStart=/home/jnufio/pixelgrid/.venv/bin/python -u -m pixelgrid.manager
 Restart=on-failure
 RestartSec=5
 

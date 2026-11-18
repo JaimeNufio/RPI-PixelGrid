@@ -1,5 +1,5 @@
 #!/bin/bash
-# One-time root setup for the RGB matrix. Run: sudo bash setup_root.sh
+# One-time root setup for the RGB matrix. Run from the repo root: sudo bash deploy/setup_root.sh
 set -e
 apt-get update
 apt-get install -y python3-dev cython3 cmake build-essential

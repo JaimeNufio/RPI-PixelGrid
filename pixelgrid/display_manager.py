@@ -20,8 +20,8 @@ import traceback
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 
-from matrix_setup import build_matrix
-from states import STATES
+from pixelgrid.matrix import build_matrix
+from pixelgrid.states import STATES
 
 
 class DisplayManager:
@@ -194,6 +194,7 @@ class DisplayManager:
 
     def run_once(self, entry, duration=None):
         """Play one entry for `duration` seconds (None = until Ctrl+C / SIGTERM)."""
+        entry = {**entry, "duration": duration}  # so logs and snapshot() show the real run length
         if not self._switch(entry, "cli", "start"):
             raise ValueError(f"can't play {entry['state']!r}")
         self._loop(service=False, deadline=None if duration is None else time.monotonic() + duration)

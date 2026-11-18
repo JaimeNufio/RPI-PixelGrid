@@ -14,16 +14,16 @@ Modes:
          red/green/blue/white so the center can be compared with its neighbors.
 
 Examples:
-  .venv/bin/python pixel_check.py solid
-  .venv/bin/python pixel_check.py grid
-  .venv/bin/python pixel_check.py walk --rows 20-24 --delay 0.05
-  .venv/bin/python pixel_check.py pixel --x 37 --y 22
-  .venv/bin/python pixel_check.py circle --x 32 --y 5 --radius 5 --hold 2
+  .venv/bin/python -m tools.pixel_check solid
+  .venv/bin/python -m tools.pixel_check grid
+  .venv/bin/python -m tools.pixel_check walk --rows 20-24 --delay 0.05
+  .venv/bin/python -m tools.pixel_check pixel --x 37 --y 22
+  .venv/bin/python -m tools.pixel_check circle --x 32 --y 5 --radius 5 --hold 2
 """
 import argparse
 import time
 
-from matrix_setup import SIZE, add_matrix_args, build_matrix
+from pixelgrid.matrix import SIZE, add_matrix_args, build_matrix
 
 COLORS = [("red", (255, 0, 0)), ("green", (0, 255, 0)), ("blue", (0, 0, 255)),
           ("white", (255, 255, 255))]

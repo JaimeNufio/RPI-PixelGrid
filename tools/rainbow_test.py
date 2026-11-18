@@ -4,14 +4,14 @@
 The rainbow runs from the top-left corner to the bottom-right corner and
 scrolls continuously along that diagonal.
 
-    .venv/bin/python rainbow_test.py
-    .venv/bin/python rainbow_test.py --brightness 50 --speed 2 --duration 20
+    .venv/bin/python -m tools.rainbow_test
+    .venv/bin/python -m tools.rainbow_test --brightness 50 --speed 2 --duration 20
 """
 import argparse
 import colorsys
 import time
 
-from matrix_setup import SIZE, add_matrix_args, build_matrix
+from pixelgrid.matrix import SIZE, add_matrix_args, build_matrix
 
 
 def parse_args():

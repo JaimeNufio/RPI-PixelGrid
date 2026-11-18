@@ -1,22 +1,20 @@
 #!/usr/bin/env python3
 """Run one mode directly, for testing. Defaults come from config.json; flags override them for this run.
 
-For the always-on service with the queue and HTTP API, use manager.py (see pixelgrid.service).
+For the always-on service with the queue and HTTP API, use pixelgrid.manager (see deploy/pixelgrid.service).
+Run from the repository root:
 
-    sudo .venv/bin/python run.py                   # config defaults (snow, 1 hour)
-    sudo .venv/bin/python run.py --indefinite      # run until Ctrl+C or SIGTERM
-    sudo .venv/bin/python run.py --rate 3 --duration 600
-    .venv/bin/python run.py --help                 # every flag, with its config default
+    sudo .venv/bin/python -m pixelgrid.run                      # config defaults
+    sudo .venv/bin/python -m pixelgrid.run --state clock --indefinite
+    sudo .venv/bin/python -m pixelgrid.run --rate 3 --duration 600
+    .venv/bin/python -m pixelgrid.run --help                    # every flag, with its config default
 """
 import argparse
-import json
 import socket
 import sys
-from pathlib import Path
 
-from states import STATES
-
-CONFIG = Path(__file__).resolve().parent / "config.json"
+from pixelgrid.config import CONFIG_PATH, load_config
+from pixelgrid.states import STATES
 
 
 def flag(name):
@@ -28,7 +26,7 @@ def build_parser(config, state_name):
     state_cfg = config["states"].get(state_name, {})
     run_cfg = config["run"]
     p = argparse.ArgumentParser(description="Run the LED display. Flags override config.json for this run.")
-    p.add_argument("--config", default=str(CONFIG), help="config file (default: config.json next to run.py)")
+    p.add_argument("--config", default=str(CONFIG_PATH), help="config file (default: config.json in the repo root)")
     p.add_argument("--state", choices=sorted(STATES), help=f"state to show (config: {run_cfg['state']})")
 
     r = p.add_argument_group("run")
@@ -74,13 +72,10 @@ def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     # First pass: find the config file and state, since the state decides which flags exist.
     pre = argparse.ArgumentParser(add_help=False)
-    pre.add_argument("--config", default=str(CONFIG))
+    pre.add_argument("--config", default=str(CONFIG_PATH))
     pre.add_argument("--state")
     known, _ = pre.parse_known_args(argv)
-    if not Path(known.config).exists():
-        sys.exit(f"{known.config} not found. Create it with: cp config.example.json config.json")
-    with open(known.config) as f:
-        config = json.load(f)
+    config = load_config(known.config)
     state_name = known.state or config["run"]["state"]
     if state_name not in STATES:
         sys.exit(f"unknown state {state_name!r}; available: {', '.join(sorted(STATES))}")
@@ -103,7 +98,7 @@ def main(argv=None):
     duration = resolve_duration(args, config["run"])
 
     # Imported here so --help works without touching the hardware library.
-    from display_manager import DisplayManager
+    from pixelgrid.display_manager import DisplayManager
     manager = DisplayManager(config)
     try:
         entry = manager.make_entry(state_name, overrides)

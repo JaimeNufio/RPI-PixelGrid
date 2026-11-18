@@ -4,31 +4,26 @@
 Plays the queue (or a random mode when it's empty), serves the HTTP API
 (see api.py), and records every play in SQLite (config "manager" -> "db_path").
 
-    sudo .venv/bin/python manager.py
+    sudo .venv/bin/python -m pixelgrid.manager      (from the repository root)
 """
 import argparse
-import json
 import sys
-from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
+from pixelgrid.config import CONFIG_PATH, load_config, resolve
 
 
 def main():
     p = argparse.ArgumentParser(description="Run the display service (queue, random modes, HTTP API).")
-    p.add_argument("--config", default=str(HERE / "config.json"))
+    p.add_argument("--config", default=str(CONFIG_PATH))
     args = p.parse_args()
-    if not Path(args.config).exists():
-        sys.exit(f"{args.config} not found. Create it with: cp config.example.json config.json")
-    with open(args.config) as f:
-        config = json.load(f)
+    config = load_config(args.config)
     mcfg = config.get("manager", {})
 
-    from api import start_api
-    from display_manager import DisplayManager
-    from store import Store
+    from pixelgrid.api import start_api
+    from pixelgrid.display_manager import DisplayManager
+    from pixelgrid.store import Store
 
-    store = Store(HERE / mcfg.get("db_path", "data/pixelgrid.db"))
+    store = Store(resolve(mcfg.get("db_path", "data/pixelgrid.db")))
     manager = DisplayManager(config, store)
     try:
         for name in mcfg.get("random_modes", []):
