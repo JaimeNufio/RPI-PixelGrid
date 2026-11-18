@@ -27,7 +27,7 @@ from pixelgrid.matrix import SIZE
 from pixelgrid.states.base import State
 from pixelgrid.states.text import font_path, ink_bounds, load_font
 
-AMPM_GAP = 2            # pixels between the time and AM/PM
+AMPM_GAP = 2            # minimum pixels between the time and AM/PM (2 or 3, see layout)
 FALLBACK_FONT = "4x6"   # used for the date when it doesn't fit in small_font
 
 
@@ -42,6 +42,17 @@ def parse_color(value):
 
 def reference(text):
     return re.sub(r"\d", "8", text)
+
+
+def render_line(font, text, space, bump):
+    """Render with `space`-pixel spaces; bump=1 widens the first space by a pixel
+    (used to make a line's width even so it centers exactly)."""
+    pixels = font.render(text, space=space)
+    cut = text.find(" ")
+    if not bump or cut < 0:
+        return pixels
+    split_x = max((x for x, _ in font.render(text[:cut], space=space)), default=-1) + 1
+    return [(x + 1 if x >= split_x else x, y) for x, y in pixels]
 
 
 class ClockState(State):
@@ -87,8 +98,9 @@ class ClockState(State):
         self.pixels = []  # [(x, y, (r, g, b)), ...]
         self.warned = set()
 
-    def layout(self, now):
-        """Pixels for the time, AM/PM and date at `now`, positioned on the panel."""
+    def layout(self, now, top=None):
+        """Pixels for the time, AM/PM and date at `now`, positioned on the panel.
+        top: row for the top of the time's ink; None centers the whole block vertically."""
         o = self.opts
         time_text = now.strftime(o["time_format"])
         ampm_text = now.strftime(o["ampm_format"]).strip() if o["ampm_format"] else ""
@@ -97,11 +109,15 @@ class ClockState(State):
         # Date first, to know how tall the whole block is.
         date_font = date_box = None
         if date_text:
+            date_bump = 0
             for font in (self.small, self.fallback):
                 date_box = ink_bounds(font.render(reference(date_text), space=o["date_space"]))
                 date_font = font
                 if date_box[2] - date_box[0] + 1 <= SIZE:
                     break
+            if (SIZE - (date_box[2] - date_box[0] + 1)) % 2 and " " in date_text:
+                date_bump = 1  # odd width: widen the first space so the margins match exactly
+                date_box = ink_bounds(render_line(date_font, reference(date_text), o["date_space"], 1))
             # Height from a fixed sample with ascenders and descenders ("May" vs "Nov"
             # would otherwise shift the layout by a pixel between months).
             _, vy0, _, vy1 = ink_bounds(date_font.render("Mgy8"))
@@ -110,19 +126,24 @@ class ClockState(State):
         tx0, ty0, tx1, ty1 = ink_bounds(self.big.render(reference(time_text)))
         time_h = ty1 - ty0 + 1
         group_w = tx1 - tx0 + 1
+        gap = AMPM_GAP
         if ampm_text:
             ax0, ay0, ax1, _ = ink_bounds(self.small.render(reference(ampm_text)))
-            group_w += AMPM_GAP + (ax1 - ax0 + 1)
+            group_w += gap + (ax1 - ax0 + 1)
+            if (SIZE - group_w) % 2:  # widen the gap a pixel so left and right margins match exactly
+                gap += 1
+                group_w += 1
         # Vertically, center the whole block: time, gap, date.
         block_h = time_h
         if date_text:
             block_h += o["date_gap"] + (date_box[3] - date_box[1] + 1)
         left = (SIZE - group_w) // 2
-        top = (SIZE - block_h) // 2
+        if top is None:
+            top = (SIZE - block_h) // 2
         dx, dy = left - tx0, top - ty0
         pixels = [(x + dx, y + dy, self.color) for x, y in self.big.render(time_text)]
         if ampm_text:
-            adx = left + (tx1 - tx0 + 1) + AMPM_GAP - ax0
+            adx = left + (tx1 - tx0 + 1) + gap - ax0
             ady = top - ay0  # top-aligned with the time
             pixels += [(x + adx, y + ady, self.color) for x, y in self.small.render(ampm_text)]
         self.check_fits(group_w, f"{time_text} {ampm_text}".strip())
@@ -133,7 +154,7 @@ class ClockState(State):
             ddx = (SIZE - (dx1 - dx0 + 1)) // 2 - dx0
             ddy = top + time_h + o["date_gap"] - dy0
             pixels += [(x + ddx, y + ddy, self.date_color)
-                       for x, y in date_font.render(date_text, space=o["date_space"])]
+                       for x, y in render_line(date_font, date_text, o["date_space"], date_bump)]
             self.check_fits(dx1 - dx0 + 1, date_text)
         return pixels
 
