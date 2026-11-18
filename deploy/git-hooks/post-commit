@@ -1,0 +1,36 @@
+#!/bin/bash
+# Reload the running display service after a commit that changes code it loads.
+#
+# Install (once per clone, from the repo root):
+#   ln -sf ../../deploy/git-hooks/post-commit .git/hooks/post-commit
+#
+# Uses pixelgrid.ctl restart (no sudo). Never fails the commit: a post-commit hook's
+# exit status is ignored, and every skip path exits 0 with a short note.
+
+cd "$(git rev-parse --show-toplevel)" || exit 0
+ref="${PIXELGRID_HOOK_REF:-HEAD}"   # override only for testing the hook
+
+# Mid-rebase / cherry-pick: skip; run `.venv/bin/python -m pixelgrid.ctl restart` once at the end.
+gitdir="$(git rev-parse --git-dir)"
+if [ -d "$gitdir/rebase-merge" ] || [ -d "$gitdir/rebase-apply" ] || [ -f "$gitdir/CHERRY_PICK_HEAD" ]; then
+    exit 0
+fi
+
+# Only restart when the commit touched files the service loads.
+changed="$(git diff-tree --root --no-commit-id --name-only -r "$ref" -- pixelgrid fonts)"
+if [ -z "$changed" ]; then
+    echo "post-commit: no service code changed; display service not restarted"
+    exit 0
+fi
+
+if [ ! -x .venv/bin/python ]; then
+    exit 0
+fi
+if ! .venv/bin/python -m pixelgrid.ctl status >/dev/null 2>&1; then
+    echo "post-commit: display service isn't running; nothing to restart"
+    exit 0
+fi
+
+echo "post-commit: service code changed; restarting the display service..."
+.venv/bin/python -m pixelgrid.ctl restart --timeout 30 2>&1 | sed 's/^/post-commit: /'
+exit 0
