@@ -4,14 +4,18 @@ Scheduling (service):
   - Each item plays for its duration, or indefinitely if it has none.
   - An indefinite item gives way as soon as something is waiting in the queue.
   - When an item ends, the next queue item plays; if the queue is empty, the
-    next item of config "manager" -> "rotation" plays (in order, cycling forever;
-    "shuffle": true picks randomly instead, never the same twice in a row).
+    next item of config "manager" -> "rotation" plays. Its order comes from the items'
+    tags (pixelgrid/scheduler.py): "active" items each play once per round, with one
+    "clock" item between them; a "group" plays back to back. "shuffle": true shuffles
+    each round, false keeps config order.
   - interject() (HTTP PUT /activity) takes over immediately; when it ends, the
     queue resumes.
 
 An entry is an activity plus optional widgets drawn on top of it:
     {"activity": "snow", "options": {...}, "duration": 60,
-     "widgets": [{"name": "clock", "options": {"top": 4}}], "preset": None}
+     "widgets": [{"name": "clock", "options": {"top": 4}}], "preset": None, "screen": None}
+"screen" plays just that one of the activity's SCREENS (the others' "<screen>_seconds"
+are set to 0 in options).
 A preset (config "presets") is a named activity + widgets combination, usable
 anywhere an activity name is (API, queue, rotation, run.py).
 
@@ -19,7 +23,6 @@ All matrix and activity work happens on the frame-loop thread. Other threads
 (the HTTP API) only call interject(), skip(), notify_queue() and snapshot().
 """
 import queue
-import random
 import signal
 import threading
 import time
@@ -28,6 +31,7 @@ from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 from pixelgrid.matrix import build_matrix
+from pixelgrid.scheduler import Rotation
 from pixelgrid.activities import ACTIVITIES
 from pixelgrid.widgets import WIDGETS
 
@@ -58,9 +62,7 @@ class DisplayManager:
         self._commands = queue.Queue()   # from API threads to the frame loop
         self.queue_waiting = threading.Event()
         self._stop = False
-        self._rotation_next = 0          # index of the next rotation item
-        self._last_rotation = None
-        self._next_pick = None           # rotation index chosen ahead of time (so it can be prefetched)
+        self._order = Rotation(self.rotation(), bool(config.get("manager", {}).get("shuffle")))
         self._prefetched_for = None      # _t0 of the item whose successor was already prefetched
         self._waiting_since = None       # when we started holding the current item for the next one's data
         self.restart_requested = False
@@ -72,11 +74,12 @@ class DisplayManager:
     def available(self):
         return sorted(set(self.registry) | set(self.presets))
 
-    def make_entry(self, name, options=None, duration=None, widgets=None):
+    def make_entry(self, name, options=None, duration=None, widgets=None, screen=None):
         """Validate a request to play an activity or preset. Returns a normalized entry:
-        {"activity", "preset", "options", "duration", "widgets": [{"name", "options"}]}.
+        {"activity", "preset", "options", "duration", "widgets": [{"name", "options"}], "screen"}.
         options hold only overrides; config defaults are merged in at play time.
-        widgets=None means the preset's widgets (or none); [] means no widgets."""
+        widgets=None means the preset's widgets (or none); [] means no widgets.
+        screen = play only that screen (the others are set to 0 seconds in options)."""
         if not name:
             raise ValueError("'activity' is required")
         preset = None
@@ -94,6 +97,12 @@ class DisplayManager:
             options = {}
         if not isinstance(options, dict):
             raise ValueError("'options' must be an object")
+        if screen is not None:
+            cls = self.registry[name]
+            if screen not in cls.SCREENS:
+                raise ValueError(f"{name} has no screen {screen!r}"
+                                 + (f"; screens: {', '.join(cls.SCREENS)}" if cls.SCREENS else " (it has only one)"))
+            options = {**options, **{cls.screen_option(s): (None if s == screen else 0) for s in cls.SCREENS}}
         if duration is not None:
             try:
                 duration = float(duration)
@@ -106,7 +115,7 @@ class DisplayManager:
         for w in widget_list:
             self._build_widget(w)  # raises ValueError if invalid
         return {"activity": name, "preset": preset, "options": options, "duration": duration,
-                "widgets": widget_list}
+                "widgets": widget_list, "screen": screen}
 
     def _normalize_widgets(self, widgets):
         if not isinstance(widgets, list):
@@ -169,7 +178,7 @@ class DisplayManager:
 
     def _switch(self, entry, source, reason):
         name = entry["activity"]
-        label = entry.get("preset") or name
+        label = (entry.get("preset") or name) + (f" ({entry['screen']})" if entry.get("screen") else "")
         widget_list = entry.get("widgets") or []
         try:
             new = self.registry[name](self._merged(self.registry[name], entry["options"]))
@@ -202,7 +211,8 @@ class DisplayManager:
         t0 = time.monotonic()
         with self._lock:
             self.current = {
-                "activity": name, "preset": entry.get("preset"), "widgets": widget_list,
+                "activity": name, "preset": entry.get("preset"), "screen": entry.get("screen"),
+                "tags": entry.get("tags", []), "widgets": widget_list,
                 "options": entry["options"], "duration": duration, "source": source,
                 "started_at": datetime.now().isoformat(timespec="seconds"),
                 "ends_at": (datetime.now() + timedelta(seconds=duration)).isoformat(timespec="seconds")
@@ -243,32 +253,26 @@ class DisplayManager:
         self._play_rotation(reason)
 
     def rotation(self):
-        """Config manager.rotation as [{"activity", "duration"?, "options"?, "widgets"?}].
-        A bare name is shorthand for {"activity": name} (plays until replaced)."""
+        """Config manager.rotation as [{"activity", "duration"?, "options"?, "widgets"?, "screen"?,
+        "tags"?, "group"?}]. A bare name is shorthand for {"activity": name} (plays until replaced)."""
         items = self.config.get("manager", {}).get("rotation") or ["snow-clock" if "snow-clock" in self.presets
                                                                     else sorted(self.registry)[0]]
         return [{"activity": i} if isinstance(i, str) else i for i in items]
 
     def rotation_entry(self, item):
-        return self.make_entry(item.get("activity"), item.get("options"), item.get("duration"), item.get("widgets"))
-
-    def _upcoming_rotation_index(self):
-        """Index of the rotation item that plays next. Chosen once and remembered, so the
-        prefetch and the actual switch agree even with shuffle on."""
-        items = self.rotation()
-        if self._next_pick is None or self._next_pick >= len(items):
-            if self.config.get("manager", {}).get("shuffle"):
-                choices = [i for i in range(len(items)) if i != self._last_rotation] or [0]
-                self._next_pick = random.choice(choices)
-            else:
-                self._next_pick = self._rotation_next % len(items)
-        return self._next_pick
+        tags = item.get("tags") or []
+        if not isinstance(tags, list) or not all(isinstance(t, str) for t in tags):
+            raise ValueError(f"{item.get('activity')}: 'tags' must be a list of names")
+        if item.get("group") is not None and not isinstance(item["group"], str):
+            raise ValueError(f"{item.get('activity')}: 'group' must be a name")
+        entry = self.make_entry(item.get("activity"), item.get("options"), item.get("duration"),
+                                item.get("widgets"), item.get("screen"))
+        entry["tags"] = tags
+        return entry
 
     def _play_rotation(self, reason):
         items = self.rotation()
-        index = self._upcoming_rotation_index()
-        self._next_pick = None
-        self._rotation_next, self._last_rotation = index + 1, index
+        index = self._order.next()
         item = items[index]
         try:
             entry = self.rotation_entry(item)
@@ -316,7 +320,7 @@ class DisplayManager:
         if self.store and (item := self.store.queue_peek()) is not None:
             return item
         try:
-            return self.rotation_entry(self.rotation()[self._upcoming_rotation_index()])
+            return self.rotation_entry(self.rotation()[self._order.peek()])
         except (ValueError, AttributeError, IndexError):
             return None
 

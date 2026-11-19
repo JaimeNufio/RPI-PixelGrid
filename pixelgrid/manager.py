@@ -32,6 +32,7 @@ def main():
     try:
         for item in manager.rotation():
             manager.rotation_entry(item)  # fail fast on a bad config instead of mid-rotation
+        manager._order.peek()            # ... including a rotation with nothing tagged to play
     except (ValueError, AttributeError) as e:
         manager.matrix.Clear()
         sys.exit(f"config error in manager.rotation: {e}")

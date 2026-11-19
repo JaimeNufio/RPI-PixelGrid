@@ -66,6 +66,8 @@ def cmd_play(c, args):
     body = {"activity": args.activity, "options": dict(args.opt or [])}
     if args.duration is not None:
         body["duration"] = args.duration
+    if args.screen:
+        body["screen"] = args.screen
     if args.no_widgets:
         body["widgets"] = []
     elif args.widget:
@@ -105,6 +107,7 @@ def main(argv=None):
     pl = sub.add_parser("play", help="play an activity or preset right now")
     pl.add_argument("activity")
     pl.add_argument("--duration", type=float, help="seconds; omit to play until replaced")
+    pl.add_argument("--screen", help="play only this screen of the activity (e.g. forecast)")
     pl.add_argument("--widget", action="append", help="widget to draw on top (repeatable)")
     pl.add_argument("--no-widgets", action="store_true", help="drop a preset's widgets")
     pl.add_argument("--opt", action="append", type=parse_opt, metavar="KEY=VALUE", help="activity option override")

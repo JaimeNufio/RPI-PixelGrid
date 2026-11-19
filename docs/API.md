@@ -23,15 +23,20 @@ changes (it rebuilds the reference at the bottom; `--check` tells you if it's st
 - **Widget**: an overlay drawn on top of any activity (e.g. `clock`).
 - **Preset**: a named activity + options + widgets (e.g. `snow-clock`). Accepted anywhere an
   activity name is.
-- **Item**: one play request: `{"activity", "options"?, "duration"?, "widgets"?}`.
+- **Item**: one play request: `{"activity", "options"?, "duration"?, "widgets"?, "screen"?}`.
   - `activity` (required): activity or preset name.
   - `options`: overrides only; config defaults fill in the rest. Unknown options are rejected.
   - `duration`: seconds; `null` or left out = until replaced (gives way as soon as something is queued).
   - `widgets`: list of names or `{"name", "options"}`; left out = the preset's widgets
     (none for a plain activity); `[]` = no widgets.
+  - `screen`: play only this screen of the activity (e.g. `"forecast"`); the others' `<screen>_seconds`
+    are set to 0 in `options`. Unknown screens are rejected.
 - **What plays when**: an interjection (`PUT /activity`) plays immediately; when an item ends,
   the next queued item plays; with an empty queue, the rotation (config `manager.rotation`)
-  continues in order, cycling forever. Interjected and queued items don't advance the rotation.
+  continues. Rotation items carry **tags**: every `active` item plays once per round (shuffled,
+  never the same twice in a row), with one `clock` item between active ones; items sharing a
+  `group` play back to back (weather `now` then `forecast`, no clock between). Untagged items are
+  benched. Interjected and queued items don't advance the rotation.
   Activities that show outside data (weather) are fetched ahead of time; if the next item's data
   still isn't there when the current one ends, the current one stays up until it is (at most 20s,
   so `remaining` can sit at 0 briefly). `PUT /activity` never waits.
@@ -63,6 +68,8 @@ What's playing now.
 {
   "activity": "weather",
   "preset": null,
+  "screen": "now",
+  "tags": ["active"],
   "widgets": [],
   "options": {},
   "duration": 120.0,
@@ -74,7 +81,8 @@ What's playing now.
 ```
 
 `remaining` and a non-null `ends_at` appear only when `duration` is set. `source` is one of
-`rotation`, `queue`, `api`, `resume` (continued after a restart), `selftest`, `cli`.
+`rotation`, `queue`, `api`, `resume` (continued after a restart), `selftest`, `cli`. `screen` is set
+when the item plays a single screen; `tags` come from the rotation item (`[]` otherwise).
 Before anything plays: `{"activity": null}`.
 
 ### `PUT /activity`
@@ -83,11 +91,11 @@ Play an item now, replacing what's on. The replaced item does not resume (nor do
 waiting to resume after a restart); afterwards the queue, then the rotation, carry on.
 
 ```json
-{"activity": "weather", "duration": 60, "options": {"forecast_seconds": 0}}
+{"activity": "weather", "duration": 60, "screen": "now"}
 ```
 
 `202 {"playing": <normalized item>}`, where the normalized item is
-`{"activity", "preset", "options", "duration", "widgets": [{"name", "options"}]}`.
+`{"activity", "preset", "options", "duration", "widgets": [{"name", "options"}], "screen"}`.
 
 ### `POST /activity/skip`
 
@@ -129,6 +137,11 @@ The API is down for a few seconds (the startup selftest then plays for about 10s
 remaining time; rotation items don't.
 
 ## Changelog
+
+- 2026-11-19: items accept `"screen"` (play one screen of an activity); `GET /activity` shows
+  `screen` and `tags`. The rotation is tag-driven: `active` items each play once per round with a
+  `clock` item between them, and a `group` plays back to back. New activity `tetris` (screen
+  `play-keep`) and preset `tetris-clock`.
 
 - 2026-11-19: snow options `melt_interval`, `floor`, `floor_above_widget`; clock widget options
   `colon_raise`, `digit_bounce`, `colon_bounce`, `bounce_period`, `bounce_stagger`, `bounce_every` (a ripple across the time every few seconds). `snow-clock` now puts a small clock in the bottom-right corner, in a snowbank

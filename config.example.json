@@ -14,10 +14,20 @@
     "api_token": null,
     "db_path": "data/pixelgrid.db",
     "rotation": [
-      {"activity": "snow-clock", "duration": 300},
-      {"activity": "weather", "duration": 120}
+      {"activity": "weather", "screen": "now", "duration": 120, "tags": ["active"], "group": "weather"},
+      {"activity": "weather", "screen": "forecast", "duration": 120, "tags": ["active"], "group": "weather"},
+      {"activity": "christmas", "screen": "snowflakes", "duration": 120, "tags": ["active"],
+       "widgets": [{"name": "clock", "options": {"top": -1}}]},
+      {"activity": "christmas", "screen": "christmas-lights", "duration": 120, "tags": ["active"],
+       "widgets": [{"name": "clock", "options": {"font": "6x10", "small_font": "4x6", "bottom": 2, "right": 2}}]},
+      {"activity": "christmas", "screen": "christmas-tree", "duration": 120, "tags": ["active"],
+       "widgets": [{"name": "clock", "options": {"font": "5x7", "ampm_format": "", "top": 2, "right": 2}}]},
+      {"activity": "tetris", "screen": "play-keep", "duration": 120, "tags": []},
+      {"activity": "snow-clock", "duration": 60, "tags": ["clock"]},
+      {"activity": "clock", "duration": 60, "tags": []},
+      {"activity": "tetris-clock", "duration": 60, "tags": ["clock"]}
     ],
-    "shuffle": false,
+    "shuffle": true,
     "startup_selftest": true
   },
   "run": {

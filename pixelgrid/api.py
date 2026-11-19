@@ -4,7 +4,8 @@
   GET    /activity        what's playing now
   GET    /widgets         available widgets, their options and config defaults
   PUT    /activity        play something right now:
-                          {"activity": "snow", "options": {...}, "duration": 60, "widgets": ["clock"]}
+                          {"activity": "snow", "options": {...}, "duration": 60, "widgets": ["clock"],
+                           "screen": null}
   POST   /activity/skip   end the current item and move on
   GET    /queue           queued items, in play order
   POST   /queue           add to the end of the queue (same body as PUT /activity)
@@ -17,7 +18,8 @@
 "activity" may be an activity or a preset (config "presets"). "options" holds only
 overrides; anything left out uses config.json. "widgets" is a list of names or
 {"name", "options"} objects; leaving it out uses the preset's widgets (or
-none). A "duration" of null (or leaving it out) means play until replaced.
+none). "screen" plays only that one of the activity's screens (e.g. "forecast").
+A "duration" of null (or leaving it out) means play until replaced.
 If config "manager" -> "api_token" is set, send "Authorization: Bearer <token>".
 """
 import json
@@ -94,7 +96,8 @@ def make_handler(manager, store, token):
 
         def entry_from_body(self):
             b = self.body()
-            return manager.make_entry(b.get("activity"), b.get("options"), b.get("duration"), b.get("widgets"))
+            return manager.make_entry(b.get("activity"), b.get("options"), b.get("duration"), b.get("widgets"),
+                                      b.get("screen"))
 
         def route(self, method):
             if token and self.headers.get("Authorization") != f"Bearer {token}":

@@ -39,6 +39,7 @@ Run everything from the repository root (`python -m ...`), so `pixelgrid` and `t
 | `pixelgrid/run.py` | One-off runner for testing a single activity (`python -m pixelgrid.run`); refuses to start while the service is up |
 | `pixelgrid/display_manager.py` | `DisplayManager`: owns the matrix and frame loop, scheduling, bad-pixel masking, crash recovery |
 | `pixelgrid/api.py` | Standard-library HTTP API (port 8080) |
+| `pixelgrid/scheduler.py` | `Rotation`: rotation order from item tags (`active`, `clock`) and `group`s; `peek()`/`next()` |
 | `pixelgrid/store.py` | SQLite queue + history (`data/pixelgrid.db`, WAL mode) |
 | `pixelgrid/matrix.py` | Builds the `RGBMatrix` (`SIZE` = 64); falls back to `/dev/gpiomem` and software timing when not root |
 | `pixelgrid/config.py` | `ROOT`, `CONFIG_PATH`, `FONT_DIR`, `load_config()`, `resolve()` (config paths are relative to the repo root) |
@@ -80,9 +81,12 @@ Run everything from the repository root (`python -m ...`), so `pixelgrid` and `t
   `show_refresh_rate: true`, run `ctl restart`, read `journalctl -u pixelgrid --all -o cat`
   (`--all` is needed because the readout contains backspaces), then turn it off; it floods the journal.
 - `manager`: `http_host`/`http_port`, `api_token` (null = no auth), `db_path`,
-  `rotation` (what plays when the queue is empty: a list of `{"activity", "duration"?, "options"?, "widgets"?}`
-  or bare names, played in order and cycled forever; default snow-clock 300s, then weather 120s),
-  `shuffle` (true = random order, never the same item twice in a row),
+  `rotation` (what plays when the queue is empty: a list of `{"activity", "duration"?, "options"?, "widgets"?,
+  "screen"?, "tags"?, "group"?}` or bare names; order from the tags, see Scheduling rules and
+  `pixelgrid/scheduler.py`). Currently: `active` = weather `now` + `forecast` (group `weather`),
+  christmas `snowflakes`, `christmas-lights`, `christmas-tree`, tetris `play-keep`, 120s each;
+  `clock` = `snow-clock`, `clock`, `tetris-clock`, 60s each.
+  `shuffle` (true = shuffle each round, never the same item twice in a row; false = config order),
   `startup_selftest` (run the selftest activity, about 10s, every time the service starts).
 - `run`: defaults for `pixelgrid.run` (`activity`, `duration`; `"indefinite"` or 0 = forever).
 - `activities.<activity>`: default options for each activity. Every declared option must be present, either
@@ -104,6 +108,11 @@ Run everything from the repository root (`python -m ...`), so `pixelgrid` and `t
 
 - Each item plays for `duration` seconds, or until replaced if `duration` is null.
 - An until-replaced item gives way as soon as something is in the queue.
+- Rotation order (`pixelgrid/scheduler.py`): items tagged `active` each play once per round before
+  any repeats; one `clock`-tagged item plays between active picks (clock items take turns the same
+  way); items with the same `group` play back to back in config order with no clock between, and
+  count as one pick. Untagged items don't play (if no item has tags, all play in turn). An item's
+  `screen` plays just that screen (`make_entry(screen=)` zeroes the others' `<screen>_seconds`).
 - When an item ends: the next queue item plays, else the next `rotation` item. If that item's
   data isn't loaded yet (`Activity.ready()`), the current item stays up until it is, at most 20s. Interjected and
   queued items don't advance the rotation; it carries on where it left off.
