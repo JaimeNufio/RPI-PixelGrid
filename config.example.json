@@ -80,6 +80,20 @@
       "forecast_font": "5x7",
       "low_color": "#7080a8"
     },
+    "tetris": {
+      "play_keep_seconds": null,
+      "move_interval": 0.08,
+      "drop_interval": 0.04,
+      "lock_delay": 0.15,
+      "lookahead": 8,
+      "temperature": 0,
+      "misdrop_rate": 0,
+      "ghost": 0.2,
+      "piece_colors": "#00d8d8,#1a40ff,#ff7a00,#f0d000,#18d018,#a020f0,#f01010",
+      "edge": 0.45,
+      "end_pause": 3,
+      "seed": null
+    },
     "christmas": {
       "snowflakes_seconds": null,
       "size": 13,
@@ -128,6 +142,20 @@
     }
   },
   "presets": {
+    "tetris-clock": {
+      "activity": "tetris",
+      "widgets": [
+        {
+          "name": "clock",
+          "options": {
+            "font": "6x10",
+            "small_font": "4x6",
+            "top": 4,
+            "left": 2
+          }
+        }
+      ]
+    },
     "weather-test-now": {"activity": "weather", "options": {"demo": 3, "forecast_seconds": 0}},
     "weather-test-forecast": {"activity": "weather", "options": {"demo": 3, "now_seconds": 0}},
     "snow-clock": {

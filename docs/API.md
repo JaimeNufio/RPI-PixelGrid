@@ -237,6 +237,28 @@ Snow activity: falling flakes that drift, land, and level out into a pile.
 | `floor` | int | `0` | rows from the bottom the snow's surface never sinks below; the mound starts on top of it and melts settle back to that; 0 = none |
 | `floor_above_widget` | int or null | `null` | keep the snow's surface at least this many rows above the top of the widgets drawn over it (negative = below), so e.g. a corner clock sits in a snowbank; the mound starts on top of it and melts settle back to that; null = off |
 
+### `tetris`
+
+Tetris activity: a self-playing game on a 16 x 16 well of 4 x 4 px cells.
+
+- frame rate: 30 fps
+- screens: `play-keep` (null `<screen>_seconds` split the play time evenly)
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `play_keep_seconds` | float or null | `null` | seconds on the play-keep screen (full rows stay, the AI packs the board until it tops out) each cycle; null = share the play time evenly with other unset screens; 0 = never |
+| `move_interval` | float | `0.08` | seconds per rotate or shift step in the spawn row |
+| `drop_interval` | float | `0.04` | seconds per row while a piece falls |
+| `lock_delay` | float | `0.15` | pause in seconds after a piece lands, before the next one appears |
+| `lookahead` | int | `8` | how many of the best placements the AI rechecks against the next piece (0 = only look at the current piece) |
+| `temperature` | float | `0` | randomness in the AI's choice: 0 = always the best placement; around 0.1-0.5 it sometimes takes a worse one |
+| `misdrop_rate` | float | `0` | chance (0-1) that a piece lands one column off from the AI's choice |
+| `ghost` | float | `0.2` | brightness of the landing preview while a piece moves, 0-1 (0 = none) |
+| `piece_colors` | str | `"#00d8d8,#1a40ff,#ff7a00,#f0d000,#18d018,#a020f0,#f01010"` | comma-separated #rrggbb colors for the I, J, L, O, S, T, Z pieces |
+| `edge` | float | `0.45` | brightness of each cell's right/bottom edge relative to its fill, 0-1 |
+| `end_pause` | float | `3` | seconds the final board stays up before it wipes and a new game starts |
+| `seed` | int or null | `null` | random seed for repeatable games; null = different every play |
+
 ### `weather`
 
 Weather activity, using Open-Meteo (https://open-meteo.com, free, no API key).
@@ -307,6 +329,7 @@ Named activity + options + widgets, usable anywhere an activity name is.
 | Preset | Activity | Options | Widgets |
 |---|---|---|---|
 | `snow-clock` | `snow` | `{"shift_at": 0, "max_pile": 30, "floor": 15, "melt_interval": 5}` | `[{"name": "clock", "options": {"font": "6x10", "small_font": "4x6", "bottom": 2, "right": 2}}]` |
+| `tetris-clock` | `tetris` | `{}` | `[{"name": "clock", "options": {"font": "6x10", "small_font": "4x6", "top": 4, "left": 2}}]` |
 | `weather-test-forecast` | `weather` | `{"demo": 3, "now_seconds": 0}` | `[]` |
 | `weather-test-now` | `weather` | `{"demo": 3, "forecast_seconds": 0}` | `[]` |
 

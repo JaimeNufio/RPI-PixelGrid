@@ -2,15 +2,15 @@
 
 An always-on LED display: a Raspberry Pi 4 (8 GB, Debian 13 "trixie") drives an
 Adafruit 64x64 RGB matrix through the Adafruit RGB Matrix HAT. A manager
-service rotates through display activities (`snow`, `clock`, `weather`, `christmas`) with optional overlay widgets
+service rotates through display activities (`snow`, `clock`, `weather`, `christmas`, `tetris`) with optional overlay widgets
 (`clock`) and named presets (`snow-clock` = snow + a small clock widget in the bottom-right corner), a persistent queue,
 on-demand interjections over HTTP, and a SQLite play history.
 
-Planned activities: stock ticker, more Christmas screens.
+Planned activities: stock ticker, more Christmas screens, more tetris screens (normal line clears, a tetris-seeking or sloppy AI).
 
 Terms: an **activity** fills the panel (snow, clock, weather; called "states"/"modes" before
 2026-11-18). An activity can have several **screens** it cycles through (weather: `now`, `forecast`;
-christmas: `snowflakes`, `christmas-lights`, `christmas-tree`).
+christmas: `snowflakes`, `christmas-lights`, `christmas-tree`; tetris: `play-keep`).
 A **widget** is an overlay drawn on top of any activity; a **preset** names an activity + widgets.
 
 ## Hardware facts
@@ -50,6 +50,8 @@ Run everything from the repository root (`python -m ...`), so `pixelgrid` and `t
 | `pixelgrid/activities/selftest.py` | Selftest activity: solid R/G/B/W, coordinate grid, diagonal rainbow; runs at service startup; doesn't mask bad pixels (`MASK_BAD_PIXELS = False`) |
 | `pixelgrid/activities/weather.py` | Weather activity (Open-Meteo, no key): `now` screen (icon + temp, today's H/L, next `hours` hours) alternating with `forecast` screen (next `days` days); `demo` cycles fake data |
 | `pixelgrid/activities/christmas.py` | Christmas activity: `snowflakes` screen (random 8-fold symmetric star flakes, 13px; `make_flake()` rejects bare, clumped or square/round-outlined patterns; rows of 3-4 mirrored around the center, each flake scattered up/down by `y_jitter`; `clear_of_below()` moves a new flake up if it could touch one below, so flakes never touch); `christmas-lights` screen (`light_rows` rows of 3x6 bulbs, `min_lights`-`max_lights` per row at random, on a 2px green wire; rows hang parallel in one shared curve (`row_sag`), `light_row_spacing` apart (default 85% of filling the panel), and droop again a random depth between bulbs (`sag`); each bulb fades to a new color on its own random timer, never matching its neighbors; block centered on the bulbs, not the dim wire); `christmas-tree` screen (3-tier fir mirrored around the center, star always `TREE_TOP_MARGIN` (3) rows below the top, trunk, snow; per tier: light strand(s) then an ornament strand lowest (count per tier from `ornaments_per_tier` ranges, strand moves down until they fit, evenly spaced, mirrored); lights change colors like christmas-lights, greens skipped). Both light screens sparkle: each light flashes toward white on its own timer (`sparkle_every`) |
+| `pixelgrid/activities/tetris.py` | Tetris activity: a self-playing game on a 16x16 well of 4x4 px cells (3x3 fill + darker right/bottom `edge`). `play-keep` screen: full rows are never cleared (they glint and stay); the `packer` AI packs the board until a piece can't spawn, then the board holds `end_pause` s, wipes top-down and a new game starts (~1 min per game, ~90% full). Pieces rotate + shift in the spawn row (`move_interval`), then drop (`drop_interval`); dim `ghost` at the landing spot. The AI thinks one piece ahead, `THINK_BUDGET` (8ms) per frame, so it never stalls a frame. `SCREEN_RULES` maps screen -> (personality, clear rows?) |
+| `pixelgrid/tetris/` | Pure tetris logic, no display code: `game.py` (bit-packed board, SRS rotation states, 7-bag, `Well.legal_moves`/`simulate`, `Game`), `agent.py` (El-Tetris features, weighted search with `lookahead` beam, `temperature`, `misdrop_rate`, `PERSONALITIES`) |
 | `pixelgrid/activities/weather_icons.py` | Icon sets: `pixel` (hand-drawn 9x9, in code), `twemoji` (downscaled), `lbc` (animated 16x16/8x8); WMO code -> condition |
 | `assets/icons/` | Icon images + licenses (Twemoji CC-BY 4.0, LoveBootCaptain MIT); see its README |
 | `pixelgrid/widgets/base.py` | `Widget(Component)`: overlay drawn on top of any activity (defaults in `widgets.<name>`) |
@@ -57,6 +59,8 @@ Run everything from the repository root (`python -m ...`), so `pixelgrid` and `t
 | `pixelgrid/widgets/__init__.py` | Widget registry (`WIDGETS`) |
 | `pixelgrid/activities/text.py` | BDF font renderer (`load_font`, `render`, `ink_bounds`) shared by text activities |
 | `tools/api_docs.py` | Regenerates the reference section of `docs/API.md` from the code + `config.example.json` (`--check` = verify) |
+| `tools/tetris_sim.py` | Headless tetris games for tuning AI weights (`python -m tools.tetris_sim --games 20 --weights holes=-12`): fill %, holes, lines, decision time |
+| `tests/` | Unit tests (`unittest`, no pytest): `.venv/bin/python -m unittest discover tests` |
 | `tools/rainbow_test.py`, `tools/pixel_check.py` | Standalone panel tests (`python -m tools.pixel_check solid`; solid/grid/walk/pixel/circle) |
 | `fonts/` | Public-domain BDF fonts (10x20, 9x18B, 6x10, 5x7, 4x6); add more from `rpi-rgb-led-matrix/fonts/` |
 | `deploy/pixelgrid.service` | systemd unit; runs `python -m pixelgrid.manager` as root |
