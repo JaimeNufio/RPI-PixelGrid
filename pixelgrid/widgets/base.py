@@ -10,3 +10,8 @@ from pixelgrid.component import Component
 
 class Widget(Component):
     SECTION = "widgets"
+
+    def bounds(self):
+        """(x0, y0, x1, y1) around the widget's visible pixels, or None if it can't say.
+        Activities read this (Activity.widget_bounds) to work around the widget."""
+        return None

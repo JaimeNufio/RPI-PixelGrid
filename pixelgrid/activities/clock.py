@@ -142,6 +142,14 @@ class ClockActivity(Activity):
             top = (SIZE - block_h) // 2
         dx, dy = left - tx0, top - ty0
         pixels = [(x + dx, y + dy, self.color) for x, y in self.big.render(time_text)]
+        # Where each of the time's characters landed, for the widget's bouncing wave.
+        self.time_chars = []   # [(char, {(x, y), ...})], left to right
+        pen = 0
+        for ch in time_text:
+            advance, glyph = self.big.glyph(ord(ch)) or (0, [])
+            if glyph:
+                self.time_chars.append((ch, {(x + pen + dx, y + dy) for x, y in glyph}))
+            pen += advance
         if ampm_text:
             adx = left + (tx1 - tx0 + 1) + gap - ax0
             ady = top - ay0  # top-aligned with the time
