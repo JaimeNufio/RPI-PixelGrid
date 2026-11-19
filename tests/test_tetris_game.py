@@ -138,5 +138,19 @@ class GameTest(unittest.TestCase):
         self.assertEqual(g2.filled(), 4)
 
 
+class ClearRowTest(unittest.TestCase):
+    def test_clear_row_drops_everything_above(self):
+        well = Well(4, 4)
+        g = Game(well, clear_lines=False)
+        g.place("I", Move(0, 0, 2))            # row 3 full
+        g.place("O", Move(0, 0, 1))            # resting on it: rows 1-2, columns 0-1
+        self.assertEqual(g.full_rows(), [3])
+        g.clear_row(3)
+        self.assertEqual(g.board, (0, 0, 0b11, 0b11))
+        self.assertEqual([row[:2] for row in g.colors], [[None, None], [None, None], ["O", "O"], ["O", "O"]])
+        self.assertEqual(g.cleared, 1)
+        self.assertEqual(g.full_rows(), [])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,9 +1,13 @@
 r"""Tetris activity: a self-playing game on a 16 x 16 well of 4 x 4 px cells.
 
-play-keep: completed rows are never cleared. The AI ("packer" in pixelgrid/tetris/agent.py)
-packs the board as tightly as it can; a row that fills up gets a white glint sweeping across
-it and stays. When the next piece can't fit, the final board holds for `end_pause` seconds,
-wipes away from the top down, and a new game starts.
+play-keep: completed rows aren't cleared as they fill. The AI ("packer" in
+pixelgrid/tetris/agent.py) packs the board as tightly as it can; a row that fills up gets a
+white glint sweeping across it and stays. When the next piece can't fit (it can't spawn, or
+every placement would stick out over the top), the board flushes: the full rows go one at a
+time from the bottom up (each flashes white, then everything above it slides down a row), and
+the same piece tries again on what's left, so the game keeps going. Only when there's no full
+row to clear does the board hold for `end_pause` seconds, wipe from the top down, and a new
+game start.
 
     +----------------+
     |      []        |  <- the piece rotates and shifts in the spawn row (move_interval
@@ -34,6 +38,8 @@ CELL = 4                        # pixels per cell
 CELLS = SIZE // CELL            # 16 x 16 well
 GLINT = 0.6                     # seconds for a completed row's glint to sweep across
 WIPE_ROW = 0.05                 # seconds per row of the game-over wipe
+FLUSH_FLASH = 0.3               # seconds a full row flashes white before it's removed (flush)
+FLUSH_DROP = 0.2                # seconds the rows above take to slide down into its place
 THINK_BUDGET = 0.008            # seconds of AI work per frame
 
 # screen -> (AI personality, clear full rows?)
@@ -95,7 +101,8 @@ class TetrisActivity(Activity):
         self.screen = None
 
     # Game flow: wait (at spawn, until the AI has decided) -> move -> fall -> lock -> next
-    # piece ... until a piece can't spawn or locks out -> over -> wipe -> new game.
+    # piece ... until a piece can't spawn or would lock out -> flush (clear full rows, bottom
+    # up) -> the same piece again; with no full rows to clear: over -> wipe -> new game.
 
     def new_game(self, screen):
         o = self.opts
@@ -119,7 +126,28 @@ class TetrisActivity(Activity):
         if self.well.fits(self.game.board, self.piece, 0, sx, sy):
             self.phase, self.timer = "wait", self.opts["move_interval"]   # a beat in the spawn spot
         else:
+            self.topped_out()
+
+    def topped_out(self):
+        """The current piece has nowhere to go: flush the full rows, or end the game if none."""
+        full = self.game.full_rows()
+        if full:
+            self.glints = {}
+            self.flush_next(full)
+        else:
             self.game_over()
+
+    def flush_next(self, full):
+        """Start removing the lowest of the full rows: flash it, then slide the rows above down."""
+        self.phase, self.flush_row, self.flush_stage = "flush", max(full), "flash"
+        self.flush_start = self.t
+        self.timer = max(self.timer, 0) + FLUSH_FLASH
+
+    def resume_after_flush(self):
+        """Back to the piece that didn't fit, rethought on the cleared board."""
+        self.decisions, self.thinking = {}, None
+        self.pending = (self.n, self.game.board)
+        self.spawn(self.n)
 
     def game_over(self):
         self.phase, self.timer = "over", self.opts["end_pause"]
@@ -162,8 +190,8 @@ class TetrisActivity(Activity):
             if self.n not in self.decisions:
                 return False
             choice = self.decisions.pop(self.n)
-            if choice is None:
-                self.game_over()
+            if choice is None or self.well.simulate(self.game.board, self.piece, choice.move)[2]:
+                self.topped_out()   # no placement, or only ones sticking out over the top
                 return True
             self.target = choice.move
             # Rotation steps, then shifts one column at a time.
@@ -201,6 +229,18 @@ class TetrisActivity(Activity):
         if self.phase == "lock":
             self.spawn(self.n + 1)
             return True
+        if self.phase == "flush":
+            if self.flush_stage == "flash":
+                self.flush_stage, self.flush_start = "drop", self.t
+                self.timer += FLUSH_DROP
+                return True
+            self.game.clear_row(self.flush_row)
+            full = self.game.full_rows()
+            if full:
+                self.flush_next(full)
+            else:
+                self.resume_after_flush()
+            return True
         if self.phase == "over":
             self.phase, self.timer, self.wipe_start = "wipe", CELLS * WIPE_ROW, self.t
             return True
@@ -213,9 +253,22 @@ class TetrisActivity(Activity):
 
     def draw(self, canvas):
         wipe = (self.t - self.wipe_start) / WIPE_ROW if self.phase == "wipe" else -1
+        flash = drop = 0.0   # flush: the row being removed flashes white, then the rows above slide down
+        if self.phase == "flush":
+            k = min(1.0, (self.t - self.flush_start) / (FLUSH_FLASH if self.flush_stage == "flash" else FLUSH_DROP))
+            if self.flush_stage == "flash":
+                flash = k
+            else:
+                drop = k
         for y, row in enumerate(self.game.colors):
             if y < int(wipe):
                 continue   # already wiped
+            dy = 0
+            if self.phase == "flush":
+                if y == self.flush_row and self.flush_stage == "drop":
+                    continue   # removed; the rows above are sliding into its place
+                if y < self.flush_row:
+                    dy = round(drop * CELL)
             glint = self.glints.get(y)
             sweep = None
             if glint is not None:
@@ -233,9 +286,11 @@ class TetrisActivity(Activity):
                     k = max(0.0, 1 - abs(x - sweep) / 2.5) * 0.85
                 if y == int(wipe):
                     k = max(k, wipe - int(wipe))
+                if self.phase == "flush" and y == self.flush_row:
+                    k = max(k, flash)
                 if k:
                     fill, edge = toward_white(fill, k), toward_white(edge, k)
-                self.draw_cell(canvas, x, y, fill, edge)
+                self.draw_cell(canvas, x, y, fill, edge, dy)
         if self.phase not in ("wait", "move", "fall"):
             return
         fill, edge = self.palette[self.piece]
@@ -249,10 +304,11 @@ class TetrisActivity(Activity):
             self.draw_cell(canvas, x, y, fill, edge)
 
     @staticmethod
-    def draw_cell(canvas, x, y, fill, edge):
+    def draw_cell(canvas, x, y, fill, edge, dy=0):
+        """A cell at (x, y), drawn dy pixels lower (a row sliding down during a flush)."""
         if y < 0:
             return
-        px, py = x * CELL, y * CELL
+        px, py = x * CELL, y * CELL + dy
         r, g, b = fill
         for dy in range(CELL - 1):
             for dx in range(CELL - 1):

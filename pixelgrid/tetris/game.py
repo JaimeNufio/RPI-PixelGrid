@@ -169,6 +169,7 @@ class Game:
         self.placed = 0         # pieces locked so far
         self.lines = 0          # rows cleared (or completed, when rows are kept)
         self.clears = [0] * 5   # clears by size, clears[4] = tetrises
+        self.cleared = 0        # kept rows removed later by clear_row() (play-keep's flush)
         self.over = False
 
     def piece(self, n):
@@ -190,6 +191,16 @@ class Game:
         self.clears[len(full)] += 1
         self.over = locked_out
         return full
+
+    def full_rows(self):
+        """Rows that are completely filled (they stay when rows are kept), top to bottom."""
+        return [y for y, r in enumerate(self.board) if r == self.well.full]
+
+    def clear_row(self, y):
+        """Remove row y; everything above it drops one row and an empty row appears on top."""
+        self.board = (0,) + self.board[:y] + self.board[y + 1:]
+        self.colors = [[None] * self.well.width] + self.colors[:y] + self.colors[y + 1:]
+        self.cleared += 1
 
     def filled(self):
         return sum(popcount(r) for r in self.board)
