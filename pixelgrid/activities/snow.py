@@ -3,7 +3,10 @@
 Flakes fall from the top at slightly different speeds and drift between
 adjacent columns. A flake that lands next to a lower column slides off into
 it and keeps falling, like sand, so the pile levels out instead of building
-pillars. The ground starts with a low mound spanning the full width.
+pillars. The ground starts with a low mound spanning the full width, and the air starts
+full of flakes at random heights, as if it had been snowing a while. The top
+`top_margin` rows stay dark (the panel's frame shades them at some angles, so
+white shows blue there): flakes appear below them and the pile never reaches them.
 
 The pile's size is tracked. When it covers shift_at of the panel, the whole
 pile slowly sinks: one row at a time, shift_rows times, shift_interval
@@ -55,6 +58,8 @@ class SnowActivity(Activity):
                                  "row, keeping its shape (snow landing on it meanwhile melts too)"),
         "floor": (int, "rows from the bottom the snow's surface never sinks below; the mound starts on top "
                        "of it and melts settle back to that; 0 = none"),
+        "top_margin": (int, "rows at the top kept dark: flakes appear below them and the pile never "
+                            "grows into them (the frame shades the top row at some angles); 0 = use them"),
         "floor_above_widget": (optional(int), "keep the snow's surface at least this many rows above the top "
                                               "of the widgets drawn over it (negative = below), so e.g. a "
                                               "corner clock sits in a snowbank; the mound starts on top of "
@@ -67,6 +72,8 @@ class SnowActivity(Activity):
             raise ValueError(f"snow: need 1 <= mound < max_pile <= {SIZE}")
         if not 0 <= o["floor"] or o["floor"] + o["mound"] >= o["max_pile"]:
             raise ValueError("snow: floor must be 0 or more, and floor + mound below max_pile")
+        if not 0 <= o["top_margin"] < SIZE // 2 or o["max_pile"] > SIZE - o["top_margin"]:
+            raise ValueError(f"snow: top_margin must be 0-{SIZE // 2 - 1}, and max_pile at most {SIZE} - top_margin")
         if o["max_step"] < 1:
             raise ValueError("snow: max_step must be 1 or more")
         if o["shift_rows"] < 1:
@@ -115,7 +122,7 @@ class SnowActivity(Activity):
 
     def add_cell(self, x):
         y = self.surface(x) - 1
-        if y >= 0:
+        if y >= self.opts["top_margin"]:
             self.colors[y][x] = snow_shade()
             self.heights[x] += 1
 
@@ -187,6 +194,20 @@ class SnowActivity(Activity):
 
     # ---- per-frame ----
 
+    def fill_air(self):
+        """Flakes already on their way down when the play starts: every flake that would have
+        spawned over the time the slowest one takes to fall, moved as far as it would have got
+        by now (drift aside), so the first frame looks like snow that's been falling a while."""
+        o = self.opts
+        slowest = o["speed"] * 0.6
+        window = SIZE / slowest
+        for _ in range(round(o["rate"] * window)):
+            x = random.randrange(SIZE)
+            v = random.uniform(o["speed"] * 0.6, o["speed"] * 1.4)
+            y = -1.0 + v * random.uniform(0, window)
+            if math.floor(y) < self.surface(x) and y >= o["top_margin"]:
+                self.flakes.append([x, y, v])
+
     def spawn(self, dt):
         expected = self.opts["rate"] * dt
         count = int(expected) + (1 if random.random() < expected % 1 else 0)
@@ -256,6 +277,7 @@ class SnowActivity(Activity):
         o = self.opts
         if self.floor is None:
             self.apply_floor()
+            self.fill_air()
         if self.melting:
             # It keeps snowing while the pile melts down a row every melt_interval; the melt
             # ends once the pile is back down to its base.
@@ -295,5 +317,5 @@ class SnowActivity(Activity):
                 canvas.SetPixel(x, y, r, g, b)
         for x, y, _ in self.flakes:
             iy = math.floor(y)
-            if iy >= 0:
+            if iy >= self.opts["top_margin"]:
                 canvas.SetPixel(x, iy, *FLAKE_COLOR)

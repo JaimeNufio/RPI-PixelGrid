@@ -48,6 +48,7 @@
       "max_pile": 40,
       "melt_interval": 0.25,
       "floor": 0,
+      "top_margin": 1,
       "floor_above_widget": null
     },
     "clock": {

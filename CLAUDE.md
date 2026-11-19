@@ -25,6 +25,8 @@ A **widget** is an overlay drawn on top of any activity; a **preset** names an a
   (`vcgencmd get_throttled` = 0x50005). Flicker and brightness flashes trace back to this. The hardware
   fix (raise the supply to ~5.2V, run the panel's power straight from the supply, or power the Pi
   separately) is still pending. Software mitigation: `display.matrix_options` below.
+- **The frame shades the top row** at some viewing angles, so white there can look blue. The snow
+  activity keeps it dark (`top_margin` 1); other activities still draw there.
 - Onboard audio is disabled (`dtparam=audio=off`, and `snd_bcm2835` is blacklisted) because
   it conflicts with the matrix driver's PWM timer.
 
@@ -46,7 +48,7 @@ Run everything from the repository root (`python -m ...`), so `pixelgrid` and `t
 | `pixelgrid/activities/__init__.py` | Activity registry (`ACTIVITIES`); register new activities here |
 | `pixelgrid/component.py` | `Component`: shared base for activities and widgets (options, config defaults + `INHERITS`, lifecycle, `every()`) |
 | `pixelgrid/activities/base.py` | `Activity(Component)`: base for activities (defaults in `activities.<name>`) |
-| `pixelgrid/activities/snow.py` | Snow activity: shift mode (`shift_at`: sink rows at a coverage share) or melt mode (`shift_at` 0: melt back down when the pile's highest point reaches `max_pile` rows); `floor` (rows the surface never sinks below) or `floor_above_widget` (rows above the widgets' top); the `mound` sits on top of the floor so it's never flat |
+| `pixelgrid/activities/snow.py` | Snow activity: shift mode (`shift_at`: sink rows at a coverage share) or melt mode (`shift_at` 0: melt back down when the pile's highest point reaches `max_pile` rows); `floor` (rows the surface never sinks below) or `floor_above_widget` (rows above the widgets' top); the `mound` sits on top of the floor so it's never flat; `fill_air()` starts each play with flakes already at random heights (back-dated spawns); `top_margin` rows at the top stay dark (no flakes drawn, pile capped below) |
 | `pixelgrid/activities/clock.py` | Clock activity: time in an explicit IANA timezone (DST-safe), small AM/PM, date line; centered on visible pixels |
 | `pixelgrid/activities/selftest.py` | Selftest activity: solid R/G/B/W, coordinate grid, diagonal rainbow; runs at service startup; doesn't mask bad pixels (`MASK_BAD_PIXELS = False`) |
 | `pixelgrid/activities/weather.py` | Weather activity (Open-Meteo, no key): `now` screen (icon + temp, today's H/L, next `hours` hours) alternating with `forecast` screen (next `days` days); `demo` cycles fake data |
