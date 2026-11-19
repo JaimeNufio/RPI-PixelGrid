@@ -104,6 +104,13 @@ class ScreenEntryTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.dm.make_entry("clock", screen="now")
 
+    def test_demo_shortens_rotation_items(self):
+        item = {"activity": "weather", "screen": "now", "duration": 120, "tags": ["active"]}
+        self.assertEqual(self.dm.rotation_entry(item)["duration"], 120)
+        self.dm.config["manager"]["demo"] = True
+        self.assertEqual(self.dm.rotation_entry(item)["duration"], 12)
+        self.assertEqual(self.dm.make_entry("weather", duration=120)["duration"], 120)   # API plays aren't
+
     def test_example_rotation_is_valid(self):
         for item in self.dm.rotation():
             e = self.dm.rotation_entry(item)

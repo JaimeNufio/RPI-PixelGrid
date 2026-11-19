@@ -87,6 +87,8 @@ Run everything from the repository root (`python -m ...`), so `pixelgrid` and `t
   christmas `snowflakes`, `christmas-lights`, `christmas-tree`, tetris `play-keep`, 120s each;
   `clock` = `snow-clock`, `clock`, `tetris-clock`, 60s each.
   `shuffle` (true = shuffle each round, never the same item twice in a row; false = config order),
+  `demo` (true = every rotation item plays for a tenth of its `duration`, same order; API/queue
+  plays and the selftest keep their real length; currently on in `config.json`),
   `startup_selftest` (run the selftest activity, about 10s, every time the service starts).
 - `run`: defaults for `pixelgrid.run` (`activity`, `duration`; `"indefinite"` or 0 = forever).
 - `activities.<activity>`: default options for each activity. Every declared option must be present, either

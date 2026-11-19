@@ -28,6 +28,7 @@
       {"activity": "tetris-clock", "duration": 60, "tags": ["clock"]}
     ],
     "shuffle": true,
+    "demo": false,
     "startup_selftest": true
   },
   "run": {

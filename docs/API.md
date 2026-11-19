@@ -36,7 +36,9 @@ changes (it rebuilds the reference at the bottom; `--check` tells you if it's st
   continues. Rotation items carry **tags**: every `active` item plays once per round (shuffled,
   never the same twice in a row), with one `clock` item between active ones; items sharing a
   `group` play back to back (weather `now` then `forecast`, no clock between). Untagged items are
-  benched. Interjected and queued items don't advance the rotation.
+  benched. With config `manager.demo` on, rotation items play for a tenth of their duration
+  (`duration` in `GET /activity` shows the shortened time). Interjected and queued items don't
+  advance the rotation.
   Activities that show outside data (weather) are fetched ahead of time; if the next item's data
   still isn't there when the current one ends, the current one stays up until it is (at most 20s,
   so `remaining` can sit at 0 briefly). `PUT /activity` never waits.
@@ -141,7 +143,7 @@ remaining time; rotation items don't.
 - 2026-11-19: items accept `"screen"` (play one screen of an activity); `GET /activity` shows
   `screen` and `tags`. The rotation is tag-driven: `active` items each play once per round with a
   `clock` item between them, and a `group` plays back to back. New activity `tetris` (screen
-  `play-keep`) and preset `tetris-clock`.
+  `play-keep`) and preset `tetris-clock`. Config `manager.demo` shortens rotation items to a tenth.
 
 - 2026-11-19: snow options `melt_interval`, `floor`, `floor_above_widget`; clock widget options
   `colon_raise`, `digit_bounce`, `colon_bounce`, `bounce_period`, `bounce_stagger`, `bounce_every` (a ripple across the time every few seconds). `snow-clock` now puts a small clock in the bottom-right corner, in a snowbank

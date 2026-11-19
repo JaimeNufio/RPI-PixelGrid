@@ -7,7 +7,8 @@ Scheduling (service):
     next item of config "manager" -> "rotation" plays. Its order comes from the items'
     tags (pixelgrid/scheduler.py): "active" items each play once per round, with one
     "clock" item between them; a "group" plays back to back. "shuffle": true shuffles
-    each round, false keeps config order.
+    each round, false keeps config order. "demo": true plays every rotation item for a
+    tenth of its duration (DEMO_SCALE), same order.
   - interject() (HTTP PUT /activity) takes over immediately; when it ends, the
     queue resumes.
 
@@ -35,6 +36,7 @@ from pixelgrid.scheduler import Rotation
 from pixelgrid.activities import ACTIVITIES
 from pixelgrid.widgets import WIDGETS
 
+DEMO_SCALE = 0.1      # config manager.demo: rotation items play for this share of their duration
 PREFETCH_LEAD = 60.0  # seconds before a timed item ends to warm the next item's data
 READY_WAIT = 20.0     # longest the current item is held while the next one has no data yet
 
@@ -268,6 +270,8 @@ class DisplayManager:
         entry = self.make_entry(item.get("activity"), item.get("options"), item.get("duration"),
                                 item.get("widgets"), item.get("screen"))
         entry["tags"] = tags
+        if self.config.get("manager", {}).get("demo") and entry["duration"] is not None:
+            entry["duration"] = round(entry["duration"] * DEMO_SCALE, 3)
         return entry
 
     def _play_rotation(self, reason):
