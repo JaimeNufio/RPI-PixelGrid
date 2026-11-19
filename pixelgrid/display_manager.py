@@ -283,6 +283,10 @@ class DisplayManager:
             except queue.Empty:
                 break
             if cmd == "play":
+                # A newer deliberate choice: drop any item still waiting to resume after a
+                # restart (e.g. one whose selftest this play interrupted), or it would cut in
+                # ahead of the queue when this play ends.
+                self._pending_resume = None
                 self._switch(arg, "api", "interrupted")
             elif cmd == "skip":
                 self._next("skipped")
