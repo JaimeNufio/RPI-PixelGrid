@@ -130,6 +130,13 @@ remaining time; rotation items don't.
 
 ## Changelog
 
+- 2026-11-19: snow options `melt_interval`, `floor`, `floor_above_widget`; clock widget options
+  `colon_raise`, `digit_bounce`, `colon_bounce`, `bounce_period`, `bounce_stagger`, `bounce_every` (a ripple across the time every few seconds). `snow-clock` now puts a small clock in the bottom-right corner, in a snowbank
+  between 15 and 30 rows deep that melts back a row every 5s (while it keeps snowing) once a flake
+  settles in row 30.
+- 2026-11-19: clock widget options `bottom`, `left`, `right` (CSS-style placement; -1 = auto).
+  `PUT /activity` now also drops an item still waiting to resume after a restart. New activity
+  `christmas` (screens `snowflakes`, `christmas-lights`, `christmas-tree`).
 - 2026-11-18: "states"/"modes" renamed to activities: `/state` → `/activity`, `/state/skip` →
   `/activity/skip`, `/modes` → `/activities`; the `"state"` key → `"activity"` in requests,
   responses, history and `/health`. Rotation source `random` → `rotation`. Added the `weather`
@@ -225,7 +232,10 @@ Snow activity: falling flakes that drift, land, and level out into a pile.
 | `shift_at` | float | `0.15` | share of the panel the pile may cover before it sinks; 0 = melt mode |
 | `shift_rows` | int | `5` | rows to sink once shift_at is reached |
 | `shift_interval` | float | `2` | seconds between each row of sinking |
-| `max_pile` | int | `40` | melt mode only: pile height that triggers the melt |
+| `max_pile` | int | `40` | melt mode only: rows from the bottom the pile's highest point may reach before it melts back down (to the mound, on top of any floor) |
+| `melt_interval` | float | `0.25` | melt mode: seconds between melting steps; each sinks the whole surface a row, keeping its shape (snow landing on it meanwhile melts too) |
+| `floor` | int | `0` | rows from the bottom the snow's surface never sinks below; the mound starts on top of it and melts settle back to that; 0 = none |
+| `floor_above_widget` | int or null | `null` | keep the snow's surface at least this many rows above the top of the widgets drawn over it (negative = below), so e.g. a corner clock sits in a snowbank; the mound starts on top of it and melts settle back to that; null = off |
 
 ### `weather`
 
@@ -277,9 +287,18 @@ Overlays drawn on top of any activity (`widgets` in a request).
 | `date_color` | str | `"#ffffff"` | date color as #rrggbb |
 | `date_gap` | int | `5` | empty rows between the time and the date |
 | `date_space` | int | `2` | width in pixels of a space in the date (the font's own is 5) |
-| `top` | int | `8` | row of the top of the time's digits; -1 centers the clock vertically |
+| `top` | int | `8` | row of the top of the time's digits; -1 = auto (centered, unless bottom is set) |
+| `bottom` | int | `-1` | rows between the clock's lowest pixel and the bottom edge; -1 = auto (wins over top) |
+| `left` | int | `-1` | pixels between the left edge and the clock; -1 = auto (centered, unless right is set) |
+| `right` | int | `-1` | pixels between the clock and the right edge; -1 = auto |
 | `outline` | int | `1` | outline thickness in pixels around every character, 0-3 (0 = none) |
 | `outline_color` | str | `"#000000"` | outline color as #rrggbb (black keeps other content off the text) |
+| `digit_bounce` | int | `2` | how high (pixels) each digit of the time rides a sine wave that runs across the time; their normal place is the bottom of the wave; 0 = still |
+| `colon_bounce` | int | `2` | the same for the colon(s); 0 = still |
+| `colon_raise` | int | `1` | pixels the colon's resting place sits above where the font puts it |
+| `bounce_period` | float | `1.0` | seconds for one bob up and down (1 = a digital clock's blink pace) |
+| `bounce_every` | float | `5` | seconds between ripples: each character bobs once, then all rest until the next (in step with the clock's seconds); 0 = a continuous wave |
+| `bounce_stagger` | float | `0.2` | seconds each character lags the one to its left, so the wave travels left to right (0 = all together) |
 
 ## Presets
 
@@ -287,7 +306,7 @@ Named activity + options + widgets, usable anywhere an activity name is.
 
 | Preset | Activity | Options | Widgets |
 |---|---|---|---|
-| `snow-clock` | `snow` | `{}` | `["clock"]` |
+| `snow-clock` | `snow` | `{"shift_at": 0, "max_pile": 30, "floor": 15, "melt_interval": 5}` | `[{"name": "clock", "options": {"font": "6x10", "small_font": "4x6", "bottom": 2, "right": 2}}]` |
 | `weather-test-forecast` | `weather` | `{"demo": 3, "now_seconds": 0}` | `[]` |
 | `weather-test-now` | `weather` | `{"demo": 3, "forecast_seconds": 0}` | `[]` |
 

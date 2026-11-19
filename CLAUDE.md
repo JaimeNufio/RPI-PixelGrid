@@ -3,7 +3,7 @@
 An always-on LED display: a Raspberry Pi 4 (8 GB, Debian 13 "trixie") drives an
 Adafruit 64x64 RGB matrix through the Adafruit RGB Matrix HAT. A manager
 service rotates through display activities (`snow`, `clock`, `weather`, `christmas`) with optional overlay widgets
-(`clock`) and named presets (`snow-clock` = snow + clock widget), a persistent queue,
+(`clock`) and named presets (`snow-clock` = snow + a small clock widget in the bottom-right corner), a persistent queue,
 on-demand interjections over HTTP, and a SQLite play history.
 
 Planned activities: stock ticker, more Christmas screens.
@@ -45,7 +45,7 @@ Run everything from the repository root (`python -m ...`), so `pixelgrid` and `t
 | `pixelgrid/activities/__init__.py` | Activity registry (`ACTIVITIES`); register new activities here |
 | `pixelgrid/component.py` | `Component`: shared base for activities and widgets (options, config defaults + `INHERITS`, lifecycle, `every()`) |
 | `pixelgrid/activities/base.py` | `Activity(Component)`: base for activities (defaults in `activities.<name>`) |
-| `pixelgrid/activities/snow.py` | Snow activity |
+| `pixelgrid/activities/snow.py` | Snow activity: shift mode (`shift_at`: sink rows at a coverage share) or melt mode (`shift_at` 0: melt back down when the pile's highest point reaches `max_pile` rows); `floor` (rows the surface never sinks below) or `floor_above_widget` (rows above the widgets' top); the `mound` sits on top of the floor so it's never flat |
 | `pixelgrid/activities/clock.py` | Clock activity: time in an explicit IANA timezone (DST-safe), small AM/PM, date line; centered on visible pixels |
 | `pixelgrid/activities/selftest.py` | Selftest activity: solid R/G/B/W, coordinate grid, diagonal rainbow; runs at service startup; doesn't mask bad pixels (`MASK_BAD_PIXELS = False`) |
 | `pixelgrid/activities/weather.py` | Weather activity (Open-Meteo, no key): `now` screen (icon + temp, today's H/L, next `hours` hours) alternating with `forecast` screen (next `days` days); `demo` cycles fake data |
@@ -53,7 +53,7 @@ Run everything from the repository root (`python -m ...`), so `pixelgrid` and `t
 | `pixelgrid/activities/weather_icons.py` | Icon sets: `pixel` (hand-drawn 9x9, in code), `twemoji` (downscaled), `lbc` (animated 16x16/8x8); WMO code -> condition |
 | `assets/icons/` | Icon images + licenses (Twemoji CC-BY 4.0, LoveBootCaptain MIT); see its README |
 | `pixelgrid/widgets/base.py` | `Widget(Component)`: overlay drawn on top of any activity (defaults in `widgets.<name>`) |
-| `pixelgrid/widgets/clock.py` | Clock widget: the clock activity's layout (inherits `activities.clock`), `top` row (-1 = centered), black `outline` ring so the activity underneath never touches the text |
+| `pixelgrid/widgets/clock.py` | Clock widget: the clock activity's layout (inherits `activities.clock`), placed CSS-style with `top`/`bottom`/`left`/`right` (-1 = auto/centered; bottom wins over top, left over right), black `outline` ring so the activity underneath never touches the text; the time's characters ride a sine wave (`digit_bounce`/`colon_bounce` px, `bounce_period`, `bounce_stagger`; one ripple every `bounce_every` s, default 5); list it more than once for several clocks |
 | `pixelgrid/widgets/__init__.py` | Widget registry (`WIDGETS`) |
 | `pixelgrid/activities/text.py` | BDF font renderer (`load_font`, `render`, `ink_bounds`) shared by text activities |
 | `tools/api_docs.py` | Regenerates the reference section of `docs/API.md` from the code + `config.example.json` (`--check` = verify) |
@@ -85,11 +85,14 @@ Run everything from the repository root (`python -m ...`), so `pixelgrid` and `t
   there or inherited: a component with `INHERITS = ("clock",)` takes matching options from
   `activities.clock` first (`Component.defaults()`), so it stays in sync with that activity.
 - `widgets.<widget>`: widget defaults (on top of inherited ones). `widgets.clock` sets
-  `date_format: ""`, `top`, `outline`, `outline_color`.
+  `date_format: ""`, `top` (8), `bottom`/`left`/`right` (-1 = auto), `outline`, `outline_color`.
 - `activities.weather`: `latitude`/`longitude` (set from the public IP: Perth Amboy, NJ), screen timing
   `now_seconds`/`forecast_seconds` (null = split the play time evenly, 0 = skip that screen), icon set/size per screen. Presets
   `weather-test-now` and `weather-test-forecast` step through every icon and -15..100° every 3s
   (reference only; not in the rotation or the startup selftest).
+- `presets.snow-clock`: snow in melt mode between `floor` 15 and `max_pile` 30 rows from the bottom (the melt starts the moment a flake settles in row 30; the surface sinks a row every `melt_interval` 5s, keeping its shape, the top pixel of each column fading to black over each step, while it keeps snowing), plus the clock widget at
+  `bottom`/`right` 2 in the 6x10 font. Activities can read their widgets' boxes
+  (`Activity.widget_bounds()`, from `Widget.bounds()`); the manager sets `activity.widgets` before `enter()`.
 - `presets.<name>`: `{"activity", "options"?, "widgets"?}`, a named activity + widgets combination usable
   anywhere an activity name is (API, queue, `rotation`, `pixelgrid.run --activity`).
 

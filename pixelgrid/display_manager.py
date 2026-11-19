@@ -175,6 +175,7 @@ class DisplayManager:
             new = self.registry[name](self._merged(self.registry[name], entry["options"]))
             new.duration = entry["duration"]  # lets activities with screens split the time
             new_widgets = [self._build_widget(w) for w in widget_list]
+            new.widgets = new_widgets  # lets an activity work around what's drawn over it
         except (KeyError, ValueError) as e:
             print(f"Manager: can't play {label!r}: {e}", flush=True)
             return False

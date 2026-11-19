@@ -34,7 +34,10 @@
       "shift_at": 0.15,
       "shift_rows": 5,
       "shift_interval": 2,
-      "max_pile": 40
+      "max_pile": 40,
+      "melt_interval": 0.25,
+      "floor": 0,
+      "floor_above_widget": null
     },
     "clock": {
       "timezone": "America/New_York",
@@ -111,8 +114,17 @@
     "clock": {
       "date_format": "",
       "top": 8,
+      "bottom": -1,
+      "left": -1,
+      "right": -1,
       "outline": 1,
-      "outline_color": "#000000"
+      "outline_color": "#000000",
+      "colon_raise": 1,
+      "digit_bounce": 2,
+      "colon_bounce": 2,
+      "bounce_period": 1.0,
+      "bounce_stagger": 0.2,
+      "bounce_every": 5
     }
   },
   "presets": {
@@ -120,7 +132,8 @@
     "weather-test-forecast": {"activity": "weather", "options": {"demo": 3, "now_seconds": 0}},
     "snow-clock": {
       "activity": "snow",
-      "widgets": ["clock"]
+      "options": {"shift_at": 0, "max_pile": 30, "floor": 15, "melt_interval": 5},
+      "widgets": [{"name": "clock", "options": {"font": "6x10", "small_font": "4x6", "bottom": 2, "right": 2}}]
     }
   }
 }

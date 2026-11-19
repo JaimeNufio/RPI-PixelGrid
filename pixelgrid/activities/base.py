@@ -20,6 +20,16 @@ class Activity(Component):
     MASK_BAD_PIXELS = True  # the selftest turns this off so bad pixels stay visible
     SCREENS = ()            # screen names, in play order
     duration = None         # seconds this play lasts, set by the manager before enter(); None = until replaced
+    widgets = ()            # the widgets drawn over this play, set by the manager before enter()
+
+    def widget_bounds(self):
+        """(x0, y0, x1, y1) around the visible pixels of every widget drawn over this play, or
+        None. E.g. snow keeps its pile high enough to tuck a corner clock into it."""
+        boxes = [b for w in self.widgets if (b := w.bounds()) is not None]
+        if not boxes:
+            return None
+        return (min(b[0] for b in boxes), min(b[1] for b in boxes),
+                max(b[2] for b in boxes), max(b[3] for b in boxes))
 
     def update(self, dt):
         raise NotImplementedError

@@ -16,6 +16,7 @@ import random
 
 from pixelgrid.matrix import SIZE
 from pixelgrid.activities.base import Activity
+from pixelgrid.component import optional
 
 AREA = SIZE * SIZE
 FLAKE_COLOR = (255, 255, 255)
@@ -48,13 +49,24 @@ class SnowActivity(Activity):
         "shift_at": (float, "share of the panel the pile may cover before it sinks; 0 = melt mode"),
         "shift_rows": (int, "rows to sink once shift_at is reached"),
         "shift_interval": (float, "seconds between each row of sinking"),
-        "max_pile": (int, "melt mode only: pile height that triggers the melt"),
+        "max_pile": (int, "melt mode only: rows from the bottom the pile's highest point may reach before "
+                          "it melts back down (to the mound, on top of any floor)"),
+        "melt_interval": (float, "melt mode: seconds between melting steps; each sinks the whole surface a "
+                                 "row, keeping its shape (snow landing on it meanwhile melts too)"),
+        "floor": (int, "rows from the bottom the snow's surface never sinks below; the mound starts on top "
+                       "of it and melts settle back to that; 0 = none"),
+        "floor_above_widget": (optional(int), "keep the snow's surface at least this many rows above the top "
+                                              "of the widgets drawn over it (negative = below), so e.g. a "
+                                              "corner clock sits in a snowbank; the mound starts on top of "
+                                              "it and melts settle back to that; null = off"),
     }
 
     def validate(self):
         o = self.opts
         if not 1 <= o["mound"] < o["max_pile"] <= SIZE:
             raise ValueError(f"snow: need 1 <= mound < max_pile <= {SIZE}")
+        if not 0 <= o["floor"] or o["floor"] + o["mound"] >= o["max_pile"]:
+            raise ValueError("snow: floor must be 0 or more, and floor + mound below max_pile")
         if o["max_step"] < 1:
             raise ValueError("snow: max_step must be 1 or more")
         if o["shift_rows"] < 1:
@@ -63,6 +75,8 @@ class SnowActivity(Activity):
             raise ValueError("snow: shift_interval must be 0 or more")
         if not 0 <= o["shift_at"] <= 0.9:
             raise ValueError("snow: shift_at must be between 0 and 0.9")
+        if o["melt_interval"] <= 0:
+            raise ValueError("snow: melt_interval must be > 0")
         if o["shift_at"] and o["shift_at"] * AREA <= SIZE * (o["mound"] + 1):
             raise ValueError("snow: shift_at is too small for the starting mound; raise it or lower mound")
 
@@ -77,6 +91,7 @@ class SnowActivity(Activity):
         self.shifts_left = 0      # shifts remaining in the current sinking sequence
         self.shift_timer = 0.0    # seconds until the next shift in the sequence
         self.base = mound_heights(self.opts["mound"])
+        self.floor = None         # set on the first update, once the widgets know where they are
         for x, h in enumerate(self.base):
             for _ in range(h):
                 self.add_cell(x)
@@ -122,6 +137,8 @@ class SnowActivity(Activity):
         """Add a flake to column x, first rolling it downhill until it is stable."""
         while (nx := self.downhill(x)) is not None:
             x = nx
+        if self.melting and self.heights[x] >= self.melt_caps[x]:
+            return   # landed on a column already at its melt cap: it melts on contact
         self.add_cell(x)
 
     def shift_down(self):
@@ -131,15 +148,42 @@ class SnowActivity(Activity):
         self.heights = [max(0, h - 1) for h in self.heights]
         return removed
 
-    def melt_step(self):
-        """Remove the top cell of every column that is above its original mound height."""
-        done = True
+    def apply_floor(self):
+        """Raise the pile's lowest allowed level to `floor` rows, or to floor_above_widget rows
+        above the top of the widgets' ink if that's higher, across the whole width, and fill
+        the pile up to it now."""
+        o = self.opts
+        self.floor = o["floor"]
+        box = self.widget_bounds() if o["floor_above_widget"] is not None else None
+        if box is not None:
+            surface = max(0, min(SIZE - 1, box[1] - o["floor_above_widget"]))   # lowest row the surface may sink to
+            self.floor = max(self.floor, SIZE - surface)
+        if not self.floor:
+            return
+        # The starting mound sits on top of the floor (not inside it, where a floor taller than
+        # the mound would leave a flat sheet), and melts settle back to that same hill.
+        self.base = [self.floor + h for h in self.base]
         for x in range(SIZE):
-            if self.heights[x] > self.base[x]:
+            while self.heights[x] < self.base[x]:
+                self.add_cell(x)
+        if o["shift_at"] == 0 and max(self.base) >= o["max_pile"]:
+            print(f"Snow: floor + mound already reach max_pile ({o['max_pile']} rows); it will keep melting; "
+                  "lower floor or mound", flush=True)
+        print(f"Snow: floor at {self.floor} rows (surface stays at or above row {SIZE - self.floor}); "
+              f"pile now {self.total} px ({100 * self.total / AREA:.1f}%).", flush=True)
+
+    def melt_step(self):
+        """Sink the whole surface a row: every column's cap drops one (never below its base,
+        the mound on top of any floor) and anything above it melts. Each column has its own cap,
+        starting from its height when the melt began, so the surface keeps its bumps as it
+        sinks (one level line would shave it into a flat plateau). Returns True once the pile
+        is back down to its base."""
+        self.melt_caps = [max(b, c - 1) for b, c in zip(self.base, self.melt_caps)]
+        for x in range(SIZE):
+            while self.heights[x] > self.melt_caps[x]:
                 self.colors[self.surface(x)][x] = None
                 self.heights[x] -= 1
-                done = False
-        return done
+        return self.melt_caps == self.base
 
     # ---- per-frame ----
 
@@ -209,26 +253,46 @@ class SnowActivity(Activity):
               f"({100 * self.total / AREA:.1f}%)", flush=True)
 
     def update(self, dt):
+        o = self.opts
+        if self.floor is None:
+            self.apply_floor()
         if self.melting:
-            # Let flakes already in the air finish; melt one layer every 0.1s.
+            # It keeps snowing while the pile melts down a row every melt_interval; the melt
+            # ends once the pile is back down to its base.
+            self.spawn(dt)
             self.step_flakes(dt)
             self.melt_timer -= dt
             if self.melt_timer <= 0:
-                self.melt_timer = 0.1
-                if self.melt_step() and not self.flakes:
+                self.melt_timer = o["melt_interval"]
+                if self.melt_step():
                     self.melting = False
+                    print(f"Snow: melted back to {self.total} px ({100 * self.total / AREA:.1f}%).", flush=True)
             return
         self.spawn(dt)
         self.step_flakes(dt)
         if self.opts["shift_at"] > 0:
             self.update_shifting(dt)
         elif max(self.heights) >= self.opts["max_pile"]:
+            print(f"Snow: pile reached {max(self.heights)} rows (max_pile); melting a row every "
+                  f"{o['melt_interval']:g}s.", flush=True)
             self.melting = True
+            self.melt_caps = list(self.heights)    # no column grows past these; they drop a row each step
+            self.melt_timer = o["melt_interval"]
 
     def draw(self, canvas):
+        # While melting, the snow that goes at the next step (each column's cells above its next
+        # cap, normally just its top pixel) fades from full brightness to black over the
+        # melt_interval before it, so the surface melts away smoothly instead of in jumps.
+        fade = None
+        if self.melting and self.opts["melt_interval"] > 0:
+            fade = max(0.0, min(1.0, self.melt_timer / self.opts["melt_interval"]))
         for x in range(SIZE):
+            keep = max(self.base[x], self.melt_caps[x] - 1) if fade is not None else SIZE
             for y in range(self.surface(x), SIZE):
-                canvas.SetPixel(x, y, *self.colors[y][x])
+                r, g, b = self.colors[y][x]
+                if SIZE - y > keep:   # this cell melts at the next step
+                    r, g, b = round(r * fade), round(g * fade), round(b * fade)
+                canvas.SetPixel(x, y, r, g, b)
         for x, y, _ in self.flakes:
             iy = math.floor(y)
             if iy >= 0:
