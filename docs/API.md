@@ -34,10 +34,10 @@ changes (it rebuilds the reference at the bottom; `--check` tells you if it's st
 - **What plays when**: an interjection (`PUT /activity`) plays immediately; when an item ends,
   the next queued item plays; with an empty queue, the rotation (config `manager.rotation`)
   continues. Rotation items carry **tags**: every `active` item plays once per round (shuffled,
-  never the same twice in a row), with one `clock` item between active ones; items sharing a
-  `group` play back to back (weather `now` then `forecast`, no clock between). Untagged items are
-  benched. The rotation never puts the same screen up twice in a row (also right after an API
-  or queued play of that screen). In debug mode (config `manager.debug`), rotation items play for a tenth of their duration
+  never the same twice in a row), with an `interlude` item (weather) between them; items sharing
+  a `group` play back to back (weather `now` then `forecast`). Other tags, like `clock` (the
+  screen shows a clock), are labels. Items tagged neither `active` nor `interlude` are benched. The rotation never puts the same screen up twice in a row (also right after an API
+  or queued play of that screen). In demo mode (config `manager.demo`), rotation items play for a tenth of their duration
   (`duration` in `GET /activity` shows the shortened time), and the top-right LED stays bright blue. Interjected and queued items don't
   advance the rotation.
   Activities that show outside data (weather) are fetched ahead of time; if the next item's data
@@ -140,6 +140,12 @@ The API is down for a few seconds (the startup selftest then plays for about 10s
 remaining time; rotation items don't.
 
 ## Changelog
+
+- 2026-11-19: debug mode renamed back to demo mode (config `manager.debug` → `manager.demo`).
+  Weather option `demo` renamed `icon_tour` (the `weather-test-*` presets use it).
+
+- 2026-11-19: new rotation tag `interlude` (weather): it plays between every other active screen.
+  `clock` is now only a label (screens that show a clock); `GET /activity` `tags` show both.
 
 - 2026-11-19: demo mode renamed debug mode: config `manager.demo` → `manager.debug`; the top-right
   LED stays bright blue while it's on. The rotation never shows the same screen twice in a row.
@@ -300,7 +306,7 @@ Weather activity, using Open-Meteo (https://open-meteo.com, free, no API key).
 | `small_font` | str | `"4x6"` | BDF font for labels and small temperatures |
 | `color` | str | `"#ffffff"` | temperature color as #rrggbb |
 | `label_color` | str | `"#9a9ac0"` | label color (day names, hours, H/L) as #rrggbb |
-| `demo` | float | `0` | seconds per condition when cycling through all icons with fake data; 0 = live |
+| `icon_tour` | float | `0` | seconds per condition when cycling through all icons with fake data; 0 = live |
 | `now_seconds` | float or null | `null` | seconds on the now screen each cycle; null = share the play time evenly with other unset screens; 0 = never |
 | `forecast_seconds` | float or null | `null` | seconds on the forecast screen each cycle; null = share evenly; 0 = never |
 | `icon_gap` | int | `3` | pixels between the big icon and the temperature |
@@ -352,7 +358,7 @@ Named activity + options + widgets, usable anywhere an activity name is.
 |---|---|---|---|
 | `snow-clock` | `snow` | `{"shift_at": 0, "max_pile": 30, "floor": 15, "melt_interval": 5}` | `[{"name": "clock", "options": {"font": "6x10", "small_font": "4x6", "bottom": 2, "right": 2}}]` |
 | `tetris-clock` | `tetris` | `{}` | `[{"name": "clock", "options": {"font": "6x10", "small_font": "4x6", "top": 4, "left": 2}}]` |
-| `weather-test-forecast` | `weather` | `{"demo": 3, "now_seconds": 0}` | `[]` |
-| `weather-test-now` | `weather` | `{"demo": 3, "forecast_seconds": 0}` | `[]` |
+| `weather-test-forecast` | `weather` | `{"icon_tour": 3, "now_seconds": 0}` | `[]` |
+| `weather-test-now` | `weather` | `{"icon_tour": 3, "forecast_seconds": 0}` | `[]` |
 
 <!-- END GENERATED -->

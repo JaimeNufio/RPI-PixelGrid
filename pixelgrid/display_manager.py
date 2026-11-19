@@ -8,10 +8,10 @@ Scheduling (service):
     tags (pixelgrid/scheduler.py): "active" items each play once per round, with one
     "clock" item between them; a "group" plays back to back. "shuffle": true shuffles
     each round, false keeps config order.
-  - Debug mode (debug_mode(): config "manager" -> "debug" for now, a hardware switch later)
-    plays every rotation item for a tenth of its duration (DEBUG_SCALE), same order, and
-    keeps the top-right LED bright blue (DEBUG_LED) as the indicator. It never turns on
-    an activity's fake-data demo (e.g. weather "demo").
+  - Demo mode (demo_mode(): config "manager" -> "demo" for now, a hardware switch later)
+    plays every rotation item for a tenth of its duration (DEMO_SCALE), same order, and
+    keeps the top-right LED bright blue (DEMO_LED) as the indicator. It doesn't change
+    what activities show (e.g. weather stays live; its icon_tour is separate).
   - interject() (HTTP PUT /activity) takes over immediately; when it ends, the
     queue resumes.
 
@@ -39,8 +39,8 @@ from pixelgrid.scheduler import Rotation
 from pixelgrid.activities import ACTIVITIES
 from pixelgrid.widgets import WIDGETS
 
-DEBUG_SCALE = 0.1     # debug mode: rotation items play for this share of their duration
-DEBUG_LED = (63, 0, (0, 0, 255))  # ... and this pixel (top-right) stays bright blue, on top of everything
+DEMO_SCALE = 0.1      # demo mode: rotation items play for this share of their duration
+DEMO_LED = (63, 0, (0, 0, 255))   # ... and this pixel (top-right) stays bright blue, on top of everything
 PREFETCH_LEAD = 60.0  # seconds before a timed item ends to warm the next item's data
 READY_WAIT = 20.0     # longest the current item is held while the next one has no data yet
 
@@ -265,10 +265,10 @@ class DisplayManager:
                                                                     else sorted(self.registry)[0]]
         return [{"activity": i} if isinstance(i, str) else i for i in items]
 
-    def debug_mode(self):
-        """True while debug mode is on: config manager.debug for now (read live, so a future
+    def demo_mode(self):
+        """True while demo mode is on: config manager.demo for now (read live, so a future
         hardware switch only has to replace this)."""
-        return bool(self.config.get("manager", {}).get("debug"))
+        return bool(self.config.get("manager", {}).get("demo"))
 
     def rotation_entry(self, item):
         tags = item.get("tags") or []
@@ -279,8 +279,8 @@ class DisplayManager:
         entry = self.make_entry(item.get("activity"), item.get("options"), item.get("duration"),
                                 item.get("widgets"), item.get("screen"))
         entry["tags"] = tags
-        if self.debug_mode() and entry["duration"] is not None:
-            entry["duration"] = round(entry["duration"] * DEBUG_SCALE, 3)
+        if self.demo_mode() and entry["duration"] is not None:
+            entry["duration"] = round(entry["duration"] * DEMO_SCALE, 3)
         return entry
 
     def _screens(self, name, screen):
@@ -494,8 +494,8 @@ class DisplayManager:
                 if not self.activity or self.activity.MASK_BAD_PIXELS:
                     for x, y in self.bad_pixels:
                         self.canvas.SetPixel(x, y, 0, 0, 0)
-                if self.debug_mode():
-                    x, y, color = DEBUG_LED
+                if self.demo_mode():
+                    x, y, color = DEMO_LED
                     self.canvas.SetPixel(x, y, *color)
                 self.canvas = self.matrix.SwapOnVSync(self.canvas)
                 elapsed = time.monotonic() - start

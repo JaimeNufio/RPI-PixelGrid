@@ -14,8 +14,8 @@ ITEMS = [
     {"activity": "christmas", "screen": "snowflakes", "tags": ["active"]},
     {"activity": "christmas", "screen": "christmas-lights", "tags": ["active"]},
     {"activity": "tetris", "screen": "play-keep", "tags": ["active"]},
-    {"activity": "snow-clock", "tags": ["clock"]},
-    {"activity": "clock", "tags": ["clock"]},
+    {"activity": "snow-clock", "tags": ["interlude"]},
+    {"activity": "clock", "tags": ["interlude"]},
     {"activity": "selftest"},   # untagged: benched
 ]
 NOW, FORECAST, CLOCKS, ACTIVE_PICKS = 0, 1, {5, 6}, 4   # 4 picks: weather group, 3 singles
@@ -64,10 +64,15 @@ class RotationTest(unittest.TestCase):
         self.assertEqual(take(Rotation(items), 6), [0, 1, 2, 0, 1, 2])
 
     def test_only_clocks_or_only_active(self):
-        clocks = [{"activity": "a", "tags": ["clock"]}, {"activity": "b", "tags": ["clock"]}]
+        clocks = [{"activity": "a", "tags": ["interlude"]}, {"activity": "b", "tags": ["interlude"]}]
         self.assertEqual(take(Rotation(clocks), 4), [0, 1, 0, 1])
         active = [{"activity": "a", "tags": ["active"]}, {"activity": "b", "tags": ["active"]}]
         self.assertEqual(take(Rotation(active), 4), [0, 1, 0, 1])
+
+    def test_clock_is_just_a_label(self):
+        items = [{"activity": "a", "tags": ["active", "clock"]}, {"activity": "b", "tags": ["clock"]},
+                 {"activity": "c", "tags": ["active"]}]
+        self.assertEqual(take(Rotation(items), 4), [0, 2, 0, 2])   # b (clock only) is benched
 
     def test_nothing_playable(self):
         with self.assertRaises(ValueError):
@@ -134,10 +139,10 @@ class ScreenEntryTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.dm.make_entry("clock", screen="now")
 
-    def test_debug_mode_shortens_rotation_items(self):
+    def test_demo_mode_shortens_rotation_items(self):
         item = {"activity": "weather", "screen": "now", "duration": 120, "tags": ["active"]}
         self.assertEqual(self.dm.rotation_entry(item)["duration"], 120)
-        self.dm.config["manager"]["debug"] = True
+        self.dm.config["manager"]["demo"] = True
         self.assertEqual(self.dm.rotation_entry(item)["duration"], 12)
         self.assertEqual(self.dm.make_entry("weather", duration=120)["duration"], 120)   # API plays aren't
 
@@ -147,8 +152,8 @@ class ScreenEntryTest(unittest.TestCase):
         self.dm.config["manager"]["rotation"] = [
             {"activity": "tetris", "screen": "play-keep", "duration": 1, "tags": ["active"]},
             {"activity": "snow", "duration": 1, "tags": ["active"]},
-            {"activity": "tetris-clock", "duration": 1, "tags": ["clock"]},
-            {"activity": "snow-clock", "duration": 1, "tags": ["clock"]},
+            {"activity": "tetris-clock", "duration": 1, "tags": ["interlude"]},
+            {"activity": "snow-clock", "duration": 1, "tags": ["interlude"]},
         ]
         self.dm._order = Rotation(self.dm.rotation(), shuffle=True, rng=random.Random(9))
         shown = []
@@ -180,6 +185,20 @@ class ScreenEntryTest(unittest.TestCase):
                 for w in self.dm.widgets:
                     w.draw(FakeCanvas())
             self.dm._end_current("test")
+
+    def test_example_rotation_weather_between_every_other_screen(self):
+        items = self.dm.rotation()
+        weather = {i for i, it in enumerate(items) if it["activity"] == "weather"}
+        active = {i for i, it in enumerate(items) if "active" in it.get("tags", []) and i not in weather}
+        order = Rotation(items, shuffle=True, rng=random.Random(6))
+        seq = take(order, 3 * 3 * len(active))
+        others = [i for i in seq if i not in weather]
+        self.assertTrue(set(others) <= active)
+        for start in range(0, len(others) - len(active) + 1, len(active)):   # each once per round
+            self.assertEqual(sorted(others[start:start + len(active)]), sorted(active))
+        for a, b in zip(seq, seq[1:]):
+            if a in active:   # every active screen is followed by weather "now"
+                self.assertEqual(items[b].get("screen"), "now")
 
     def test_example_rotation_is_valid(self):
         for item in self.dm.rotation():

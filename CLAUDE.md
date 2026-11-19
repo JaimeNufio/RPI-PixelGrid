@@ -51,7 +51,7 @@ Run everything from the repository root (`python -m ...`), so `pixelgrid` and `t
 | `pixelgrid/activities/snow.py` | Snow activity: shift mode (`shift_at`: sink rows at a coverage share) or melt mode (`shift_at` 0: melt back down when the pile's highest point reaches `max_pile` rows); `floor` (rows the surface never sinks below) or `floor_above_widget` (rows above the widgets' top); the `mound` sits on top of the floor so it's never flat; `fill_air()` starts each play with flakes already at random heights (back-dated spawns); `top_margin` rows at the top stay dark (no flakes drawn, pile capped below) |
 | `pixelgrid/activities/clock.py` | Clock activity: time in an explicit IANA timezone (DST-safe), small AM/PM, date line; centered on visible pixels |
 | `pixelgrid/activities/selftest.py` | Selftest activity: solid R/G/B/W, coordinate grid, diagonal rainbow; runs at service startup; doesn't mask bad pixels (`MASK_BAD_PIXELS = False`) |
-| `pixelgrid/activities/weather.py` | Weather activity (Open-Meteo, no key): `now` screen (icon + temp, today's H/L, next `hours` hours) alternating with `forecast` screen (next `days` days); `demo` cycles fake data |
+| `pixelgrid/activities/weather.py` | Weather activity (Open-Meteo, no key): `now` screen (icon + temp, today's H/L, next `hours` hours) alternating with `forecast` screen (next `days` days); `icon_tour` cycles fake data through every icon |
 | `pixelgrid/activities/christmas.py` | Christmas activity: `snowflakes` screen (random 8-fold symmetric star flakes, 13px; `make_flake()` rejects bare, clumped or square/round-outlined patterns; rows of 3-4 mirrored around the center, each flake scattered up/down by `y_jitter`; `clear_of_below()` moves a new flake up if it could touch one below, so flakes never touch); `christmas-lights` screen (`light_rows` (2) rows of 5x8 bulbs, `min_lights`-`max_lights` (3-4) per row at random, on a 3px green wire; rows hang parallel in one shared curve (`row_sag`), `light_row_spacing` apart (default 85% of filling the panel), and droop again a random depth between bulbs (`sag`); each bulb fades to a new color on its own random timer, never matching its neighbors; block centered on the bulbs, not the dim wire); `christmas-tree` screen (3-tier fir mirrored around the center, star always `TREE_TOP_MARGIN` (3) rows below the top, trunk, snow; per tier: light strand(s) then an ornament strand lowest (count per tier from `ornaments_per_tier` ranges, strand moves down until they fit, evenly spaced, mirrored); lights change colors like christmas-lights, greens skipped). Both light screens sparkle: each light flashes toward white on its own timer (`sparkle_every`) |
 | `pixelgrid/activities/tetris.py` | Tetris activity: a self-playing game on a 16x16 well of 4x4 px cells (3x3 fill + darker right/bottom `edge`). `play-keep` screen: full rows are never cleared (they glint and stay); the `packer` AI packs the board until a piece can't spawn, then the board holds `end_pause` s, wipes top-down and a new game starts (~1 min per game, ~90% full). Pieces rotate + shift in the spawn row (`move_interval`), then drop (`drop_interval`); dim `ghost` at the landing spot. The AI thinks one piece ahead, `THINK_BUDGET` (8ms) per frame, so it never stalls a frame. `SCREEN_RULES` maps screen -> (personality, clear rows?) |
 | `pixelgrid/tetris/` | Pure tetris logic, no display code: `game.py` (bit-packed board, SRS rotation states, 7-bag, `Well.legal_moves`/`simulate`, `Game`), `agent.py` (El-Tetris features, weighted search with `lookahead` beam, `temperature`, `misdrop_rate`, `PERSONALITIES`) |
@@ -85,14 +85,15 @@ Run everything from the repository root (`python -m ...`), so `pixelgrid` and `t
 - `manager`: `http_host`/`http_port`, `api_token` (null = no auth), `db_path`,
   `rotation` (what plays when the queue is empty: a list of `{"activity", "duration"?, "options"?, "widgets"?,
   "screen"?, "tags"?, "group"?}` or bare names; order from the tags, see Scheduling rules and
-  `pixelgrid/scheduler.py`). Currently: `active` = weather `now` + `forecast` (group `weather`),
-  christmas `snowflakes`, `christmas-lights`, `christmas-tree`, tetris `play-keep`, 120s each;
-  `clock` = `snow-clock`, `clock`, `tetris-clock`, 60s each.
+  `pixelgrid/scheduler.py`). Currently: weather `now` + `forecast` (group `weather`, tags `active` +
+  `interlude`, 120s each) play between every other screen; `active` + `clock` = christmas
+  `snowflakes`, `christmas-lights`, `christmas-tree` (120s each, big centered clock widget),
+  `snow-clock`, `tetris-clock` (60s each); benched: tetris `play-keep` (no clock), plain `clock`.
   `shuffle` (true = shuffle each round, never the same item twice in a row; false = config order),
-  `debug` (debug mode, read through `DisplayManager.debug_mode()`, to be tied to a hardware switch
+  `demo` (demo mode, read through `DisplayManager.demo_mode()`, to be tied to a hardware switch
   later: every rotation item plays for a tenth of its `duration`, same order; API/queue plays and
   the selftest keep their real length; the top-right LED (63, 0) stays bright blue as the indicator;
-  never turns on an activity's fake-data `demo`; currently on in `config.json`),
+  doesn't change what activities show; currently on in `config.json`. There is no "debug" mode),
   `startup_selftest` (run the selftest activity, about 10s, every time the service starts).
 - `run`: defaults for `pixelgrid.run` (`activity`, `duration`; `"indefinite"` or 0 = forever).
 - `activities.<activity>`: default options for each activity. Every declared option must be present, either
@@ -115,9 +116,11 @@ Run everything from the repository root (`python -m ...`), so `pixelgrid` and `t
 - Each item plays for `duration` seconds, or until replaced if `duration` is null.
 - An until-replaced item gives way as soon as something is in the queue.
 - Rotation order (`pixelgrid/scheduler.py`): items tagged `active` each play once per round before
-  any repeats; one `clock`-tagged item plays between active picks (clock items take turns the same
-  way); items with the same `group` play back to back in config order with no clock between, and
-  count as one pick. Untagged items don't play (if no item has tags, all play in turn). The rotation
+  any repeats; an `interlude` item (weather) plays between them: active -> weather -> another
+  active not played yet this round -> weather -> ... (several interludes would take turns the same
+  way); items with the same `group` play back to back in config order with nothing between, and
+  count as one pick. Other tags (`clock` = shows a clock) are labels only. Items tagged neither
+  `active` nor `interlude` don't play (if no item has tags, all play in turn). The rotation
   never shows the same screen twice in a row (same activity + screen, so `tetris-clock` repeats
   `play-keep` and `snow-clock` repeats `snow`), even after an API/queue play: the manager passes
   `_avoid()` to `peek`/`next`, and the pick waits for later in its round (or one is borrowed early). An item's

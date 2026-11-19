@@ -14,21 +14,21 @@
     "api_token": null,
     "db_path": "data/pixelgrid.db",
     "rotation": [
-      {"activity": "weather", "screen": "now", "duration": 120, "tags": ["active"], "group": "weather"},
-      {"activity": "weather", "screen": "forecast", "duration": 120, "tags": ["active"], "group": "weather"},
-      {"activity": "christmas", "screen": "snowflakes", "duration": 120, "tags": ["active"],
+      {"activity": "weather", "screen": "now", "duration": 120, "tags": ["active", "interlude"], "group": "weather"},
+      {"activity": "weather", "screen": "forecast", "duration": 120, "tags": ["active", "interlude"], "group": "weather"},
+      {"activity": "christmas", "screen": "snowflakes", "duration": 120, "tags": ["active", "clock"],
        "widgets": [{"name": "clock", "options": {"top": -1}}]},
-      {"activity": "christmas", "screen": "christmas-lights", "duration": 120, "tags": ["active"],
+      {"activity": "christmas", "screen": "christmas-lights", "duration": 120, "tags": ["active", "clock"],
        "widgets": [{"name": "clock", "options": {"top": -1}}]},
-      {"activity": "christmas", "screen": "christmas-tree", "duration": 120, "tags": ["active"],
+      {"activity": "christmas", "screen": "christmas-tree", "duration": 120, "tags": ["active", "clock"],
        "widgets": [{"name": "clock", "options": {"top": -1}}]},
       {"activity": "tetris", "screen": "play-keep", "duration": 120, "tags": []},
-      {"activity": "snow-clock", "duration": 60, "tags": ["clock"]},
-      {"activity": "clock", "duration": 60, "tags": []},
-      {"activity": "tetris-clock", "duration": 60, "tags": ["clock"]}
+      {"activity": "snow-clock", "duration": 60, "tags": ["active", "clock"]},
+      {"activity": "clock", "duration": 60, "tags": ["clock"]},
+      {"activity": "tetris-clock", "duration": 60, "tags": ["active", "clock"]}
     ],
     "shuffle": true,
-    "debug": false,
+    "demo": false,
     "startup_selftest": true
   },
   "run": {
@@ -83,7 +83,7 @@
       "small_font": "4x6",
       "color": "#ffffff",
       "label_color": "#9a9ac0",
-      "demo": 0,
+      "icon_tour": 0,
       "now_seconds": null,
       "forecast_seconds": null,
       "days": 3,
@@ -168,8 +168,8 @@
         }
       ]
     },
-    "weather-test-now": {"activity": "weather", "options": {"demo": 3, "forecast_seconds": 0}},
-    "weather-test-forecast": {"activity": "weather", "options": {"demo": 3, "now_seconds": 0}},
+    "weather-test-now": {"activity": "weather", "options": {"icon_tour": 3, "forecast_seconds": 0}},
+    "weather-test-forecast": {"activity": "weather", "options": {"icon_tour": 3, "now_seconds": 0}},
     "snow-clock": {
       "activity": "snow",
       "options": {"shift_at": 0, "max_pile": 30, "floor": 15, "melt_interval": 5},

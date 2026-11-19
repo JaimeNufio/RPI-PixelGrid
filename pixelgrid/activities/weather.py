@@ -26,8 +26,8 @@ forecast: the next `days` days, starting tomorrow, filling the panel.
 Data is fetched in a background thread every `refresh` seconds. Icon sets live
 in weather_icons.py.
 
-demo > 0 skips the network and cycles through every condition (and the night
-variants) every `demo` seconds with made-up temperatures, for judging the icons.
+icon_tour > 0 skips the network and cycles through every condition (and the night
+variants) every `icon_tour` seconds with made-up temperatures, for judging the icons.
 """
 import json
 import threading
@@ -49,8 +49,8 @@ FALLBACK_FONT = "4x6"  # forecast temperatures that don't fit their column
 LINE_SAMPLE = "Mgy8°"
 CAPS_SAMPLE = "MT8°"  # lines without descenders (forecast day names, temperatures)  # fixed sample for text line height, so rows don't shift with content
 
-DEMO = [(c, False) for c in CONDITIONS] + [("clear", True), ("partly", True)]
-DEMO_TEMPS = [-15, 15, 45, 75, 100]   # -15 to 100 in steps of 30, plus 100 for the widest text
+TOUR = [(c, False) for c in CONDITIONS] + [("clear", True), ("partly", True)]
+TOUR_TEMPS = [-15, 15, 45, 75, 100]   # -15 to 100 in steps of 30, plus 100 for the widest text
 
 COMMON_OPTIONS = {
     "latitude": (float, "location latitude (decimal degrees)"),
@@ -63,7 +63,7 @@ COMMON_OPTIONS = {
     "small_font": (str, "BDF font for labels and small temperatures"),
     "color": (str, "temperature color as #rrggbb"),
     "label_color": (str, "label color (day names, hours, H/L) as #rrggbb"),
-    "demo": (float, "seconds per condition when cycling through all icons with fake data; 0 = live"),
+    "icon_tour": (float, "seconds per condition when cycling through all icons with fake data; 0 = live"),
 }
 
 
@@ -162,7 +162,7 @@ class WeatherBase(Activity):
         self.data = cached[1] if cached else None   # shown immediately; fetch() refreshes it (see fetch_weather())
         self.t = 0.0
         self.pixels = []
-        if o["demo"] <= 0:
+        if o["icon_tour"] <= 0:
             self.every(o["refresh"], self.fetch)
 
     def fetch(self):
@@ -172,20 +172,20 @@ class WeatherBase(Activity):
     @classmethod
     def prefetch(cls, opts):
         """Warm the shared cache before this activity plays (called by the manager)."""
-        if opts["demo"] <= 0:
+        if opts["icon_tour"] <= 0:
             cached_or_fetch(opts)
 
     @classmethod
     def ready(cls, opts):
         """True when there's data to show right away (any age; a stale cache beats a blank screen)."""
-        return opts["demo"] > 0 or cache_get(opts) is not None
+        return opts["icon_tour"] > 0 or cache_get(opts) is not None
 
-    def demo_data(self):
-        """Fake data for step int(t / demo): every slot steps through all conditions, and every
-        temperature slot through all DEMO_TEMPS (offset per slot, so each screen shows a mix)."""
-        step = int(self.t // self.opts["demo"])
-        pick = lambda k: DEMO[(step + k) % len(DEMO)]
-        temp = lambda k: DEMO_TEMPS[(step + k) % len(DEMO_TEMPS)]
+    def tour_data(self):
+        """Fake data for step int(t / icon_tour): every slot steps through all conditions, and every
+        temperature slot through all TOUR_TEMPS (offset per slot, so each screen shows a mix)."""
+        step = int(self.t // self.opts["icon_tour"])
+        pick = lambda k: TOUR[(step + k) % len(TOUR)]
+        temp = lambda k: TOUR_TEMPS[(step + k) % len(TOUR_TEMPS)]
         cond, night = pick(0)
         hours = [(label, *pick(k), temp(k)) for k, label in enumerate(("10AM", "11AM", "12PM"), 1)]
         days = [(("Wed", "Thu", "Fri", "Sat")[k], pick(k)[0], temp(k), temp(k + 2)) for k in range(4)]
@@ -216,7 +216,7 @@ class WeatherBase(Activity):
 
     def update(self, dt):
         self.t += dt
-        data = self.demo_data() if self.opts["demo"] > 0 else self.data
+        data = self.tour_data() if self.opts["icon_tour"] > 0 else self.data
         self.pixels = self.layout(data) if data else self.text(self.big, "--°", SIZE // 2, 22, self.color)
 
     def draw(self, canvas):

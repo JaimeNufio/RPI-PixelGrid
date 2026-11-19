@@ -1,14 +1,16 @@
 """Rotation order: what plays next when the queue is empty, from the tags on config
 manager.rotation items.
 
-    active   in the cycle. Every active item plays once before any plays again.
-    clock    an interlude: one clock item plays between active items (they take turns
-             the same way, each once before any repeats).
-    group    items with the same "group" (a field, not a tag) play back to back in
-             config order, with no clock between them, and count as one pick
-             (weather "now" then "forecast").
+    active     in the cycle. Every active item plays once before any plays again.
+    interlude  plays between the other active picks (weather): active -> interlude ->
+               another active not played yet this round -> interlude -> ... Several
+               interludes take turns the same way, each once before any repeats.
+    group      items with the same "group" (a field, not a tag) play back to back in
+               config order, with nothing between them, and count as one pick
+               (weather "now" then "forecast").
 
-An item with neither tag is listed but doesn't play (drop "active" to bench something).
+Other tags (e.g. "clock": the screen shows a clock) are labels only. An item tagged neither
+active nor interlude is listed but doesn't play (drop "active" to bench something).
 peek()/next() take `avoid`: rotation indices that would show the same screen as what's on
 the panel now (the manager works these out, including after an API/queue play). A pick
 in `avoid` waits for a later turn in its round; if nothing else is left in the round, an
@@ -25,7 +27,7 @@ false keeps config order.
 import random
 from collections import deque
 
-TAGS = ("active", "clock")
+TAGS = ("active", "interlude")   # the tags that affect the order
 
 
 class Bag:
@@ -85,37 +87,37 @@ class Bag:
 class Rotation:
     def __init__(self, items, shuffle=False, rng=None):
         rng = rng or random.Random()
-        units, clocks, groups = [], [], {}
+        units, interludes, groups = [], [], {}
         tagged = any(item.get("tags") for item in items)
         for i, item in enumerate(items):
             tags = set(item.get("tags") or ())
-            if not tagged or ("active" in tags and "clock" not in tags):
-                group = item.get("group")
-                if group is None:
-                    units.append([i])
-                elif group in groups:
-                    groups[group].append(i)
-                else:
-                    groups[group] = [i]
-                    units.append(groups[group])
-            elif "clock" in tags:
-                clocks.append([i])
+            if tagged and not tags & set(TAGS):
+                continue   # benched
+            target = interludes if "interlude" in tags else units
+            group = item.get("group")
+            if group is None:
+                target.append([i])
+            elif group in groups:
+                groups[group].append(i)
+            else:
+                groups[group] = [i]
+                target.append(groups[group])
         self.active = Bag(units, shuffle, rng)
-        self.clocks = Bag(clocks, shuffle, rng)
+        self.interludes = Bag(interludes, shuffle, rng)
         self.upcoming = deque()
-        self.clock_next = False   # start with an active item
-        self.drawn = None         # (bag, key, clock_next before) of a unit not started yet
+        self.interlude_next = False   # start with an active item
+        self.drawn = None             # (bag, key, interlude_next before) of a unit not started yet
 
     def _fill(self, avoid):
         if self.upcoming:
             return
-        before = self.clock_next
-        if self.clocks.units and (self.clock_next or not self.active.units):
-            bag, self.clock_next = self.clocks, False
+        before = self.interlude_next
+        if self.interludes.units and (self.interlude_next or not self.active.units):
+            bag, self.interlude_next = self.interludes, False
         elif self.active.units:
-            bag, self.clock_next = self.active, True
+            bag, self.interlude_next = self.active, True
         else:
-            raise ValueError("manager.rotation has nothing to play: tag at least one item \"active\" or \"clock\"")
+            raise ValueError("manager.rotation has nothing to play: tag at least one item \"active\" or \"interlude\"")
         k = bag.draw(avoid)
         self.upcoming.extend(bag.units[k])
         self.drawn = (bag, k, before)
@@ -127,7 +129,7 @@ class Rotation:
             bag, k, before = self.drawn
             bag.put_back(k)
             self.upcoming.clear()
-            self.clock_next = before
+            self.interlude_next = before
             self.drawn = None
 
     def peek(self, avoid=frozenset()):
