@@ -7,8 +7,11 @@ Scheduling (service):
     next item of config "manager" -> "rotation" plays. Its order comes from the items'
     tags (pixelgrid/scheduler.py): "active" items each play once per round, with one
     "clock" item between them; a "group" plays back to back. "shuffle": true shuffles
-    each round, false keeps config order. "demo": true plays every rotation item for a
-    tenth of its duration (DEMO_SCALE), same order.
+    each round, false keeps config order.
+  - Debug mode (debug_mode(): config "manager" -> "debug" for now, a hardware switch later)
+    plays every rotation item for a tenth of its duration (DEBUG_SCALE), same order, and
+    keeps the top-right LED bright blue (DEBUG_LED) as the indicator. It never turns on
+    an activity's fake-data demo (e.g. weather "demo").
   - interject() (HTTP PUT /activity) takes over immediately; when it ends, the
     queue resumes.
 
@@ -36,7 +39,8 @@ from pixelgrid.scheduler import Rotation
 from pixelgrid.activities import ACTIVITIES
 from pixelgrid.widgets import WIDGETS
 
-DEMO_SCALE = 0.1      # config manager.demo: rotation items play for this share of their duration
+DEBUG_SCALE = 0.1     # debug mode: rotation items play for this share of their duration
+DEBUG_LED = (63, 0, (0, 0, 255))  # ... and this pixel (top-right) stays bright blue, on top of everything
 PREFETCH_LEAD = 60.0  # seconds before a timed item ends to warm the next item's data
 READY_WAIT = 20.0     # longest the current item is held while the next one has no data yet
 
@@ -261,6 +265,11 @@ class DisplayManager:
                                                                     else sorted(self.registry)[0]]
         return [{"activity": i} if isinstance(i, str) else i for i in items]
 
+    def debug_mode(self):
+        """True while debug mode is on: config manager.debug for now (read live, so a future
+        hardware switch only has to replace this)."""
+        return bool(self.config.get("manager", {}).get("debug"))
+
     def rotation_entry(self, item):
         tags = item.get("tags") or []
         if not isinstance(tags, list) or not all(isinstance(t, str) for t in tags):
@@ -270,13 +279,31 @@ class DisplayManager:
         entry = self.make_entry(item.get("activity"), item.get("options"), item.get("duration"),
                                 item.get("widgets"), item.get("screen"))
         entry["tags"] = tags
-        if self.config.get("manager", {}).get("demo") and entry["duration"] is not None:
-            entry["duration"] = round(entry["duration"] * DEMO_SCALE, 3)
+        if self.debug_mode() and entry["duration"] is not None:
+            entry["duration"] = round(entry["duration"] * DEBUG_SCALE, 3)
         return entry
+
+    def _screens(self, name, screen):
+        """{(activity, screen)} an activity or preset shows: just `screen` if given, else all
+        of the activity's screens ((activity, None) for one without SCREENS)."""
+        activity = self.presets[name].get("activity") if name in self.presets else name
+        cls = self.registry.get(activity)
+        shown = (screen,) if screen else (cls.SCREENS if cls and cls.SCREENS else (None,))
+        return {(activity, s) for s in shown}
+
+    def _avoid(self):
+        """Rotation indices that would show the same screen as what's playing now, so the
+        rotation never puts the same screen up twice in a row."""
+        cur = self.current and self.current.get("_entry")
+        if not cur:
+            return frozenset()
+        now = self._screens(cur.get("preset") or cur["activity"], cur.get("screen"))
+        return frozenset(i for i, item in enumerate(self.rotation())
+                         if self._screens(item.get("activity"), item.get("screen")) & now)
 
     def _play_rotation(self, reason):
         items = self.rotation()
-        index = self._order.next()
+        index = self._order.next(self._avoid())
         item = items[index]
         try:
             entry = self.rotation_entry(item)
@@ -324,7 +351,7 @@ class DisplayManager:
         if self.store and (item := self.store.queue_peek()) is not None:
             return item
         try:
-            return self.rotation_entry(self.rotation()[self._order.peek()])
+            return self.rotation_entry(self.rotation()[self._order.peek(self._avoid())])
         except (ValueError, AttributeError, IndexError):
             return None
 
@@ -467,6 +494,9 @@ class DisplayManager:
                 if not self.activity or self.activity.MASK_BAD_PIXELS:
                     for x, y in self.bad_pixels:
                         self.canvas.SetPixel(x, y, 0, 0, 0)
+                if self.debug_mode():
+                    x, y, color = DEBUG_LED
+                    self.canvas.SetPixel(x, y, *color)
                 self.canvas = self.matrix.SwapOnVSync(self.canvas)
                 elapsed = time.monotonic() - start
                 if elapsed < frame_time:

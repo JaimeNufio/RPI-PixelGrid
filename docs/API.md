@@ -36,8 +36,9 @@ changes (it rebuilds the reference at the bottom; `--check` tells you if it's st
   continues. Rotation items carry **tags**: every `active` item plays once per round (shuffled,
   never the same twice in a row), with one `clock` item between active ones; items sharing a
   `group` play back to back (weather `now` then `forecast`, no clock between). Untagged items are
-  benched. With config `manager.demo` on, rotation items play for a tenth of their duration
-  (`duration` in `GET /activity` shows the shortened time). Interjected and queued items don't
+  benched. The rotation never puts the same screen up twice in a row (also right after an API
+  or queued play of that screen). In debug mode (config `manager.debug`), rotation items play for a tenth of their duration
+  (`duration` in `GET /activity` shows the shortened time), and the top-right LED stays bright blue. Interjected and queued items don't
   advance the rotation.
   Activities that show outside data (weather) are fetched ahead of time; if the next item's data
   still isn't there when the current one ends, the current one stays up until it is (at most 20s,
@@ -140,6 +141,10 @@ remaining time; rotation items don't.
 
 ## Changelog
 
+- 2026-11-19: demo mode renamed debug mode: config `manager.demo` → `manager.debug`; the top-right
+  LED stays bright blue while it's on. The rotation never shows the same screen twice in a row.
+  christmas-lights: bigger bulbs (5x8, 3px wire), 3-4 per row, 2 rows framing a widget.
+
 - 2026-11-19: items accept `"screen"` (play one screen of an activity); `GET /activity` shows
   `screen` and `tags`. The rotation is tag-driven: `active` items each play once per round with a
   `clock` item between them, and a `group` plays back to back. New activity `tetris` (screen
@@ -184,9 +189,9 @@ Christmas activity: holiday screens: "snowflakes", then "christmas-lights".
 | `sway` | float | `1` | side-to-side drift in pixels while falling; 0 = straight down |
 | `colors` | str | `"#ffffff,#d8ecff,#a8d4ff"` | comma-separated #rrggbb colors picked at random per flake |
 | `christmas_lights_seconds` | float or null | `null` | seconds on the christmas-lights screen each cycle; null = share the play time evenly with other unset screens; 0 = never |
-| `light_rows` | int | `3` | rows of lights, evenly spaced down the panel (1-4) |
-| `min_lights` | int | `4` | fewest bulbs in a row (each row picks at random, spread evenly across) |
-| `max_lights` | int | `6` | most bulbs in a row |
+| `light_rows` | int | `2` | rows of lights, evenly spaced down the panel (1-4) |
+| `min_lights` | int | `3` | fewest bulbs in a row (each row picks at random, spread evenly across) |
+| `max_lights` | int | `4` | most bulbs in a row |
 | `sag` | float | `5` | deepest the wire droops between two bulbs, in pixels (each droop is random up to this) |
 | `row_sag` | float | `6` | how far the rows droop in the middle, hung from just past the panel edges (75-100% of this, the same for every row so they stay parallel) |
 | `light_row_spacing` | float or null | `null` | pixels from one row of lights to the next; null = 85% of the spacing that would fill the panel |

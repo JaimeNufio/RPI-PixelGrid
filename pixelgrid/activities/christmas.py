@@ -21,7 +21,7 @@ christmas-lights: `light_rows` rows of bulbs hanging from a green wire.
     +----------------------------------+
     |  \_o_/\_o_/\_o_/\_o_/\_o_/        |   <- each row hangs in a long curve (row_sag) and
     |                                  |      droops again between bulbs (sag), each droop a
-    |  \_o_/\_o_/\_o_/\_o_/\_o_/        |      random depth; bulbs are 3 x 6, the wire 2 thick
+    |  \_o_/\_o_/\_o_/\_o_/\_o_/        |      random depth; bulbs are 5 x 8, the wire 3 thick
     +----------------------------------+
 
 Rows are evenly spaced and vertically centered; each row has min_lights..max_lights
@@ -148,19 +148,22 @@ def row_centers(n, min_step=0):
     return left + ([int(mid)] if n % 2 else []) + [SIZE - 1 - x for x in reversed(left)]
 
 
-WIRE_W = 2           # wire thickness in pixels (drawn downward from its top edge)
-# A hanging bulb, relative to where it hangs (the top of the wire): the socket just under
-# the wire, then a 3 x 6 glass bulb (twice as tall as wide) with a two-pixel highlight
-# streak and a dim halo around the glass.
-SOCKET = [(0, WIRE_W)]
-BULB = [(0, WIRE_W + 1)] + [(dx, WIRE_W + dy) for dy in (2, 3, 4, 5) for dx in (-1, 0, 1)] + [(0, WIRE_W + 6)]
-BULB_SHINE = [(-1, WIRE_W + 2), (-1, WIRE_W + 3)]
-BULB_DROP = WIRE_W + 6   # rows from the hang point to the bottom of the bulb
+WIRE_W = 3           # wire thickness in pixels (drawn downward from its top edge)
+# A hanging bulb, relative to where it hangs (the top of the wire): a 3-wide socket just
+# under the wire, then a 5 x 8 glass bulb (3-wide neck, 5 x 5 body, 3-wide taper, 1-pixel
+# tip) with a three-pixel highlight streak and a dim halo around the glass.
+SOCKET = [(dx, WIRE_W) for dx in (-1, 0, 1)]
+BULB = ([(dx, WIRE_W + 1) for dx in (-1, 0, 1)]
+        + [(dx, WIRE_W + dy) for dy in range(2, 7) for dx in (-2, -1, 0, 1, 2)]
+        + [(dx, WIRE_W + 7) for dx in (-1, 0, 1)] + [(0, WIRE_W + 8)])
+BULB_SHINE = [(-1, WIRE_W + 2), (-1, WIRE_W + 3), (-1, WIRE_W + 4)]
+BULB_DROP = WIRE_W + 8   # rows from the hang point to the bottom of the bulb
 # Halo: pixels directly beside the glass (not diagonal, so it stays round instead of a box),
 # never on the socket or the wire above it.
 BULB_GLOW = sorted({(x + dx, y + dy) for x, y in BULB for dx, dy in ((-1, 0), (1, 0), (0, 1))}
-                   - set(BULB) - {(dx, dy) for dx in (-1, 0, 1) for dy in range(WIRE_W + 1)})
+                   - set(BULB) - {(dx, dy) for dx in (-2, -1, 0, 1, 2) for dy in range(WIRE_W + 1)})
 NUDGE_CELL = 6       # width in pixels of each cell of the shared up/down nudge pattern
+WIDGET_GAP = 3       # rows between a widget's text and the light rows framing it (outline + 1 blank)
 MIN_ROW_SPACING = BULB_DROP + 4   # hang point to the next row's wire: glow, 1 blank row, +-1 nudges
 FADE = 0.25          # seconds a bulb takes to fade to its new color
 
@@ -374,7 +377,7 @@ class ChristmasActivity(Activity):
             self.row_y -= self.gap()
             self.spawn_row(self.row_y)
         self.next_gap = self.gap()
-        self.build_lights()
+        self.rows = None   # laid out on the first update, once the widgets know where they are
         self.build_tree()
 
     def gap(self):
@@ -417,6 +420,8 @@ class ChristmasActivity(Activity):
         return y
 
     def update(self, dt):
+        if self.rows is None:
+            self.build_lights()
         self.t += dt
         screen = self.screen_at(self.t)
         if screen == "snowflakes":
@@ -472,7 +477,9 @@ class ChristmasActivity(Activity):
         a pixel by a random pattern shared by every row (so the spacing stays even), and the
         wire droops a random depth between each pair of bulbs (sag), so no two rows look alike. Rows are light_row_spacing apart (by default 85% of
         what would fill the panel), and the block is centered on its bulbs, the bright part
-        the eye sees, rather than on the dim wire (mx-auto, vertically)."""
+        the eye sees, rather than on the dim wire (mx-auto, vertically). With two rows and a
+        widget drawn over the screen (a centered clock), the rows frame it instead: one above,
+        one below (frame_widget)."""
         o, rng = self.opts, self.rng
         n = o["light_rows"]
         ends = (-6, SIZE + 5)   # where the rows are "hung", just off the panel
@@ -530,8 +537,28 @@ class ChristmasActivity(Activity):
         shift = max(-ink_top, min(SIZE - 1 - ink_bottom, shift))
         for row in rows:
             self.shift_row(row, shift)
+        box = self.widget_bounds()
+        if box is not None and n == 2:
+            self.frame_widget(rows, box, glass)
+        for row in rows:
             row["wire"] = [(x, y) for x, y in row["wire"] if 0 <= x < SIZE and 0 <= y < SIZE]
         self.rows = rows
+
+    def frame_widget(self, rows, box, glass):
+        """Two rows around a widget (e.g. a centered clock): the first centered in the space
+        above its box, the second in the space below, each kept WIDGET_GAP rows clear of the
+        box (its text; the gap covers the outline plus a blank row). If a row doesn't fit its
+        space, it stays clear of the widget and runs off the panel's outer edge instead."""
+        spaces = ((0, box[1] - WIDGET_GAP), (box[3] + WIDGET_GAP, SIZE - 1))
+        for row, (lo, hi), upper in zip(rows, spaces, (True, False)):
+            ys = [y for _, y in row["wire"]] + [b["y"] + dy for b in row["bulbs"] for _, dy in glass]
+            top, bottom = min(ys), max(ys)
+            shift = (lo + hi) // 2 - (top + bottom) // 2
+            if upper:
+                shift = min(shift, hi - bottom)    # never into the widget
+            else:
+                shift = max(shift, lo - top)
+            self.shift_row(row, shift)
 
     @staticmethod
     def shift_row(row, dy):
