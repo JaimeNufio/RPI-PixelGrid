@@ -2,14 +2,15 @@
 
 An always-on LED display: a Raspberry Pi 4 (8 GB, Debian 13 "trixie") drives an
 Adafruit 64x64 RGB matrix through the Adafruit RGB Matrix HAT. A manager
-service rotates through display activities (`snow`, `clock`, `weather`) with optional overlay widgets
+service rotates through display activities (`snow`, `clock`, `weather`, `christmas`) with optional overlay widgets
 (`clock`) and named presets (`snow-clock` = snow + clock widget), a persistent queue,
 on-demand interjections over HTTP, and a SQLite play history.
 
-Planned activities: stock ticker, Christmas/holiday animations.
+Planned activities: stock ticker, more Christmas screens.
 
 Terms: an **activity** fills the panel (snow, clock, weather; called "states"/"modes" before
-2026-11-18). An activity can have several **screens** it cycles through (weather: `now`, `forecast`).
+2026-11-18). An activity can have several **screens** it cycles through (weather: `now`, `forecast`;
+christmas: `snowflakes`, `christmas-lights`, `christmas-tree`).
 A **widget** is an overlay drawn on top of any activity; a **preset** names an activity + widgets.
 
 ## Hardware facts
@@ -48,6 +49,7 @@ Run everything from the repository root (`python -m ...`), so `pixelgrid` and `t
 | `pixelgrid/activities/clock.py` | Clock activity: time in an explicit IANA timezone (DST-safe), small AM/PM, date line; centered on visible pixels |
 | `pixelgrid/activities/selftest.py` | Selftest activity: solid R/G/B/W, coordinate grid, diagonal rainbow; runs at service startup; doesn't mask bad pixels (`MASK_BAD_PIXELS = False`) |
 | `pixelgrid/activities/weather.py` | Weather activity (Open-Meteo, no key): `now` screen (icon + temp, today's H/L, next `hours` hours) alternating with `forecast` screen (next `days` days); `demo` cycles fake data |
+| `pixelgrid/activities/christmas.py` | Christmas activity: `snowflakes` screen (random 8-fold symmetric star flakes, 13px; `make_flake()` rejects bare, clumped or square/round-outlined patterns; rows of 3-4 mirrored around the center, each flake scattered up/down by `y_jitter`; `clear_of_below()` moves a new flake up if it could touch one below, so flakes never touch); `christmas-lights` screen (`light_rows` rows of 3x6 bulbs, `min_lights`-`max_lights` per row at random, on a 2px green wire; rows hang parallel in one shared curve (`row_sag`), `light_row_spacing` apart (default 85% of filling the panel), and droop again a random depth between bulbs (`sag`); each bulb fades to a new color on its own random timer, never matching its neighbors; block centered on the bulbs, not the dim wire); `christmas-tree` screen (3-tier fir mirrored around the center, star always `TREE_TOP_MARGIN` (3) rows below the top, trunk, snow; per tier: light strand(s) then an ornament strand lowest (count per tier from `ornaments_per_tier` ranges, strand moves down until they fit, evenly spaced, mirrored); lights change colors like christmas-lights, greens skipped). Both light screens sparkle: each light flashes toward white on its own timer (`sparkle_every`) |
 | `pixelgrid/activities/weather_icons.py` | Icon sets: `pixel` (hand-drawn 9x9, in code), `twemoji` (downscaled), `lbc` (animated 16x16/8x8); WMO code -> condition |
 | `assets/icons/` | Icon images + licenses (Twemoji CC-BY 4.0, LoveBootCaptain MIT); see its README |
 | `pixelgrid/widgets/base.py` | `Widget(Component)`: overlay drawn on top of any activity (defaults in `widgets.<name>`) |
@@ -99,7 +101,7 @@ Run everything from the repository root (`python -m ...`), so `pixelgrid` and `t
   data isn't loaded yet (`Activity.ready()`), the current item stays up until it is, at most 20s. Interjected and
   queued items don't advance the rotation; it carries on where it left off.
 - `PUT /activity` interjects immediately; afterwards the queue resumes. The item it
-  replaced does not resume.
+  replaced does not resume, and neither does an item still waiting to resume after a restart.
 - At startup: the selftest first (if `manager.startup_selftest`). Then, after a requested restart
   (`ctl restart` / `POST /admin/restart`), the item that was playing resumes with its remaining time,
   but only if it was a deliberate pick (API or queue; rotation items aren't resumed);
@@ -139,6 +141,7 @@ preset changes, run `.venv/bin/python -m tools.api_docs` (`--check` reports a st
    To overlay something on other activities, write a widget (`pixelgrid/widgets/`, same lifecycle) and
    combine it with an activity in a preset, rather than writing a combined activity.
    For several full-panel screens, set `SCREENS = ("a", "b")`, add an `a_seconds`/`b_seconds` option
+   (a `-` in a screen name becomes `_`: screen `christmas-lights` -> `christmas_lights_seconds`)
    of type `optional(float)` (from `pixelgrid.component`; null in config = split the play time evenly),
    call `self.validate_screens()` in `validate()`, and pick the screen with `self.screen_at(t)`.
 2. Keep `__init__` cheap with no side effects: the manager builds throwaway instances to

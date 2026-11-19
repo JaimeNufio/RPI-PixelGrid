@@ -79,8 +79,8 @@ Before anything plays: `{"activity": null}`.
 
 ### `PUT /activity`
 
-Play an item now, replacing what's on. The replaced item does not resume; afterwards the queue,
-then the rotation, carry on.
+Play an item now, replacing what's on. The replaced item does not resume (nor does an item still
+waiting to resume after a restart); afterwards the queue, then the rotation, carry on.
 
 ```json
 {"activity": "weather", "duration": 60, "options": {"forecast_seconds": 0}}
@@ -140,6 +140,43 @@ remaining time; rotation items don't.
 ## Activities
 
 Options and defaults below come from the code and `config.example.json`.
+
+### `christmas`
+
+Christmas activity: holiday screens: "snowflakes", then "christmas-lights".
+
+- frame rate: display default fps
+- screens: `snowflakes`, `christmas-lights`, `christmas-tree` (null `<screen>_seconds` split the play time evenly)
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `snowflakes_seconds` | float or null | `null` | seconds on the snowflakes screen each cycle; null = share the play time evenly with other unset screens; 0 = never |
+| `size` | int | `13` | snowflake width in pixels (odd, 9-21) |
+| `min_per_row` | int | `3` | fewest flakes in a row |
+| `max_per_row` | int | `4` | most flakes in a row (each row picks at random); a row too wide for the panel (4 x 17px) spreads out and its outer flakes are clipped by the edges |
+| `spacing` | int | `20` | average rows from one row of flakes to the next |
+| `speed` | float | `5` | fall speed in rows per second |
+| `jitter` | int | `2` | max pixels each flake is nudged sideways from its even spot (as far as the row has room) and the gap between rows varies by |
+| `y_jitter` | int | `5` | max rows each flake is nudged up/down from its row, so rows don't line up; a flake that would come too close to one below is moved up instead |
+| `sway` | float | `1` | side-to-side drift in pixels while falling; 0 = straight down |
+| `colors` | str | `"#ffffff,#d8ecff,#a8d4ff"` | comma-separated #rrggbb colors picked at random per flake |
+| `christmas_lights_seconds` | float or null | `null` | seconds on the christmas-lights screen each cycle; null = share the play time evenly with other unset screens; 0 = never |
+| `light_rows` | int | `3` | rows of lights, evenly spaced down the panel (1-4) |
+| `min_lights` | int | `4` | fewest bulbs in a row (each row picks at random, spread evenly across) |
+| `max_lights` | int | `6` | most bulbs in a row |
+| `sag` | float | `5` | deepest the wire droops between two bulbs, in pixels (each droop is random up to this) |
+| `row_sag` | float | `6` | how far the rows droop in the middle, hung from just past the panel edges (75-100% of this, the same for every row so they stay parallel) |
+| `light_row_spacing` | float or null | `null` | pixels from one row of lights to the next; null = 85% of the spacing that would fill the panel |
+| `wire_color` | str | `"#0e5a1c"` | wire color as #rrggbb |
+| `light_colors` | str | `"#ff1a1a,#1aff3a,#1a5aff,#ffb300,#ff5a00,#c81aff"` | comma-separated #rrggbb bulb colors |
+| `change_every` | float | `3` | average seconds before a bulb changes color (each bulb on its own random timer) |
+| `sparkle_every` | float | `5` | average seconds between sparkles per light: a quick flash toward white with a flared glow, each light on its own random timer (christmas-lights and christmas-tree); 0 = no sparkle |
+| `glow` | float | `0.15` | brightness of the halo around each bulb, 0-1 (0 = none) |
+| `christmas_tree_seconds` | float or null | `null` | seconds on the christmas-tree screen each cycle; null = share the play time evenly with other unset screens; 0 = never |
+| `ornaments_per_tier` | str | `"3-4,5-6,6-8"` | ornament count range for each tier, top to bottom, e.g. "3-4,5-6,6-8" (each play picks within each range); one evenly spaced strand per tier |
+| `ornament_colors` | str | `"#e01a28,#ffc028,#2a5aff,#d0d0e0,#b020d0"` | comma-separated #rrggbb ornament colors |
+| `garlands` | int | `4` | strands of lights wrapped around the tree (1-4); they use light_colors, change_every and glow like the christmas-lights screen |
+| `tree_light_spacing` | int | `4` | pixels between lights along a strand |
 
 ### `clock`
 

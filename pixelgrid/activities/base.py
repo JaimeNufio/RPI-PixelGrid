@@ -5,7 +5,7 @@ fills the whole panel; widgets (pixelgrid/widgets/) are drawn on top of it.
 
 Screens: an activity can cycle through several full-panel screens (weather: "now",
 "forecast"). List them in SCREENS and declare an optional "<screen>_seconds" option
-for each (type optional(float)). Each screen gets its own value; screens left at
+for each (type optional(float); a "-" in a screen name becomes "_" in the option). Each screen gets its own value; screens left at
 null share the play time evenly: (duration - fixed screens) / unset screens, so
 weather playing for 120s shows each screen for 60s. With no duration (until
 replaced), unset screens get SCREEN_FALLBACK seconds each. 0 skips a screen.
@@ -37,9 +37,15 @@ class Activity(Component):
         item isn't ready, the manager keeps the current one up a little longer (READY_WAIT)."""
         return True
 
+    @staticmethod
+    def screen_option(screen):
+        """The option holding a screen's seconds: "<screen>_seconds", with any "-" in the
+        screen name as "_" (screen "christmas-lights" -> option "christmas_lights_seconds")."""
+        return screen.replace("-", "_") + "_seconds"
+
     def screen_times(self):
         """[(screen, seconds)] for one cycle, skipping screens set to 0."""
-        fixed = {s: self.opts.get(f"{s}_seconds") for s in self.SCREENS}
+        fixed = {s: self.opts.get(self.screen_option(s)) for s in self.SCREENS}
         unset = [s for s, v in fixed.items() if v is None]
         share = SCREEN_FALLBACK
         if unset and self.duration:
@@ -60,8 +66,8 @@ class Activity(Component):
 
     def validate_screens(self):
         for s in self.SCREENS:
-            v = self.opts.get(f"{s}_seconds")
+            v = self.opts.get(self.screen_option(s))
             if v is not None and v < 0:
-                raise ValueError(f"{self.name}: {s}_seconds must be 0 or more (or null to share evenly)")
-        if self.SCREENS and all(self.opts.get(f"{s}_seconds") == 0 for s in self.SCREENS):
+                raise ValueError(f"{self.name}: {self.screen_option(s)} must be 0 or more (or null to share evenly)")
+        if self.SCREENS and all(self.opts.get(self.screen_option(s)) == 0 for s in self.SCREENS):
             raise ValueError(f"{self.name}: every screen is set to 0 seconds")
